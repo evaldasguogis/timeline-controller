@@ -1,0 +1,43 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "panel",
+  "name": "Timeline Controller",
+  "id": "evaldasguogis-timelinecontroller-panel",
+  "info": {
+    "keywords": [
+      "time",
+      "time slider",
+      "time range",
+      "playback",
+      "replay",
+      "scrubber",
+      "animation",
+      "timeline",
+      "play",
+      "pause",
+      "forward",
+      "backward",
+      "step",
+      "sliding window",
+      "event replay",
+      "comparison",
+      "dashboard"
+    ],
+    "description": "A Grafana panel plugin that controls dashboard time range and template variables to replay history.",
+    "author": {
+      "name": "Evaldas Guogis"
+    },
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "links": [],
+    "screenshots": [],
+    "version": "%VERSION%",
+    "updated": "%TODAY%"
+  },
+  "dependencies": {
+    "grafanaDependency": ">=12.3.0",
+    "plugins": []
+  }
+}
