@@ -1,0 +1,118 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Dev: start (watch + Grafana)",
+      "detail": "Run webpack watch and Grafana container side by side. Plugin reloads on save; open http://localhost:3000.",
+      "dependsOn": ["Dev: webpack watch", "Dev: Grafana up"],
+      "dependsOrder": "parallel",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Dev: webpack watch",
+      "type": "npm",
+      "script": "dev",
+      "isBackground": true,
+      "presentation": {
+        "panel": "dedicated",
+        "group": "dev",
+        "reveal": "always",
+        "clear": true
+      },
+      "problemMatcher": {
+        "owner": "webpack",
+        "fileLocation": "absolute",
+        "pattern": {
+          "regexp": "^ERROR in (.*):(\\d+):(\\d+)\\s*$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "message": 0
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^.*(webpack \\d|compiling|rebuilding).*$",
+          "endsPattern": "^.*(compiled|webpack \\d.* compiled).*$"
+        }
+      }
+    },
+    {
+      "label": "Dev: Grafana up",
+      "type": "shell",
+      "command": "docker compose up --build",
+      "isBackground": true,
+      "presentation": {
+        "panel": "dedicated",
+        "group": "dev",
+        "reveal": "always",
+        "clear": true
+      },
+      "problemMatcher": {
+        "owner": "grafana",
+        "pattern": {
+          "regexp": "^level=error.*msg=\"(.*)\"",
+          "message": 1
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*Starting Grafana.*",
+          "endsPattern": ".*HTTP Server Listen.*"
+        }
+      }
+    },
+    {
+      "label": "Dev: Grafana down",
+      "detail": "Stop the Grafana container.",
+      "type": "shell",
+      "command": "docker compose down",
+      "presentation": { "panel": "shared", "reveal": "always", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Dev: Grafana logs",
+      "detail": "Tail logs of the running Grafana container.",
+      "type": "shell",
+      "command": "docker compose logs -f grafana",
+      "presentation": { "panel": "dedicated", "reveal": "always" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build (production)",
+      "type": "npm",
+      "script": "build",
+      "group": "build",
+      "presentation": { "panel": "shared", "reveal": "always", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Typecheck",
+      "type": "npm",
+      "script": "typecheck",
+      "presentation": { "panel": "shared", "reveal": "always", "clear": true },
+      "problemMatcher": "$tsc"
+    },
+    {
+      "label": "Lint",
+      "type": "npm",
+      "script": "lint",
+      "presentation": { "panel": "shared", "reveal": "always", "clear": true },
+      "problemMatcher": "$eslint-stylish"
+    },
+    {
+      "label": "Lint: fix",
+      "type": "npm",
+      "script": "lint:fix",
+      "presentation": { "panel": "shared", "reveal": "always", "clear": true },
+      "problemMatcher": "$eslint-stylish"
+    },
+    {
+      "label": "Test (CI)",
+      "type": "npm",
+      "script": "test:ci",
+      "group": "test",
+      "presentation": { "panel": "shared", "reveal": "always", "clear": true },
+      "problemMatcher": []
+    }
+  ]
+}
