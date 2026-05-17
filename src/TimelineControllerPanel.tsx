@@ -1,24 +1,18 @@
 import React from 'react';
-import { GrafanaTheme2, PanelProps } from '@grafana/data';
-import { useStyles2 } from '@grafana/ui';
-import { css } from '@emotion/css';
-import { TimelineControllerOptions } from 'types';
+import { PanelProps } from '@grafana/data';
+import { defaultTimelineControllerOptions, TimelineControllerOptions } from 'types';
+import { BasicMode } from './modes/BasicMode';
 
 type Props = PanelProps<TimelineControllerOptions>;
 
-const getStyles = (theme: GrafanaTheme2) => ({
-  wrapper: css`
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 100%;
-    color: ${theme.colors.text.secondary};
-    font-style: italic;
-  `,
-});
-
-export const TimelineControllerPanel: React.FC<Props> = () => {
-  const styles = useStyles2(getStyles);
-  return <div className={styles.wrapper}>Timeline Controller (skeleton)</div>;
+export const TimelineControllerPanel: React.FC<Props> = ({ options, onOptionsChange, timeRange }) => {
+  // Saved panels may pre-date any option added since they were stored, and
+  // Grafana passes the persisted shape through verbatim. Deep-merging defaults
+  // here means BasicMode can assume every field is present.
+  const merged: TimelineControllerOptions = {
+    ...defaultTimelineControllerOptions,
+    ...options,
+    basic: { ...defaultTimelineControllerOptions.basic, ...options?.basic },
+  };
+  return <BasicMode options={merged} onOptionsChange={onOptionsChange} timeRange={timeRange} />;
 };

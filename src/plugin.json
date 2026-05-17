@@ -3,6 +3,7 @@
   "type": "panel",
   "name": "Timeline Controller",
   "id": "evaldasguogis-timelinecontroller-panel",
+  "skipDataQuery": true,
   "info": {
     "keywords": [
       "time",

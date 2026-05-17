@@ -1,7 +1,13 @@
 apiVersion: 1
 
 datasources:
-  - name: TestData DB
-    type: testdata
-    uid: trlxrdZVk
+  - name: Prometheus Demo
+    type: prometheus
+    uid: prom-demo
+    access: proxy
+    url: https://demo.promlabs.com
     isDefault: true
+    editable: true
+    jsonData:
+      httpMethod: POST
+      timeInterval: 15s
