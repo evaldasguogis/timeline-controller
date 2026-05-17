@@ -33,7 +33,9 @@ const makeOptions = (overrides: Partial<TimelineControllerOptions> = {}): Timeli
 });
 
 const renderBasic = (overrides: Partial<TimelineControllerOptions> = {}, timeRange = initialTimeRange) => {
-  return render(<BasicMode options={makeOptions(overrides)} onOptionsChange={jest.fn()} timeRange={timeRange} />);
+  return render(
+    <BasicMode options={makeOptions(overrides)} onOptionsChange={jest.fn()} timeRange={timeRange} />
+  );
 };
 
 const rerenderWith = (
@@ -198,7 +200,9 @@ describe('BasicMode', () => {
       jest.advanceTimersByTime(1000);
     });
 
-    // Simulate the user picking a new range via the global time picker.
+    // Simulate the user picking a new range via the global time picker —
+    // Grafana re-renders the panel with a new timeRange prop that doesn't
+    // match what we last wrote.
     const externalRange: TimeRange = {
       from: dateTime('2026-05-16T00:30:00Z'),
       to: dateTime('2026-05-16T01:00:00Z'),
@@ -244,5 +248,64 @@ describe('BasicMode', () => {
     });
 
     expect(partial).toHaveBeenCalledWith({ from: 'now-30m', to: 'now' });
+  });
+
+  it('External time-picker change adopted before any user interaction with the panel', () => {
+    // The user picks a new range via the global time picker before clicking
+    // anything in our panel. There's no "last write" to compare against, so
+    // the matchesBaseline check carries the discrimination instead.
+    const { rerender } = renderBasic();
+
+    const externalRange: TimeRange = {
+      from: dateTime('2026-05-16T00:30:00Z'),
+      to: dateTime('2026-05-16T01:00:00Z'),
+      raw: { from: 'now-30m', to: 'now' },
+    };
+    rerenderWith(rerender, externalRange);
+
+    // Step then Reset should restore the *new* baseline, not the initial one.
+    act(() => {
+      screen.getByLabelText('Step back').click();
+    });
+    partial.mockClear();
+    act(() => {
+      screen.getByLabelText('Reset').click();
+    });
+
+    expect(partial).toHaveBeenCalledWith({ from: 'now-30m', to: 'now' });
+  });
+
+  it('Three external picks in a row leave the baseline on the most recent', () => {
+    const { rerender } = renderBasic();
+
+    const pick1: TimeRange = {
+      from: dateTime('2026-05-16T00:00:00Z'),
+      to: dateTime('2026-05-16T01:00:00Z'),
+      raw: { from: 'now-1h', to: 'now' },
+    };
+    const pick2: TimeRange = {
+      from: dateTime('2026-05-16T00:30:00Z'),
+      to: dateTime('2026-05-16T01:00:00Z'),
+      raw: { from: 'now-30m', to: 'now' },
+    };
+    const pick3: TimeRange = {
+      from: dateTime('2026-05-16T00:45:00Z'),
+      to: dateTime('2026-05-16T01:00:00Z'),
+      raw: { from: 'now-15m', to: 'now' },
+    };
+
+    rerenderWith(rerender, pick1);
+    rerenderWith(rerender, pick2);
+    rerenderWith(rerender, pick3);
+
+    act(() => {
+      screen.getByLabelText('Step back').click();
+    });
+    partial.mockClear();
+    act(() => {
+      screen.getByLabelText('Reset').click();
+    });
+
+    expect(partial).toHaveBeenCalledWith({ from: 'now-15m', to: 'now' });
   });
 });

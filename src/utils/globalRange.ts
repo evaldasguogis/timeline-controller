@@ -1,4 +1,4 @@
-import { RawTimeRange, rangeUtil, TimeRange } from '@grafana/data';
+import { dateTime, DateTime, RawTimeRange, rangeUtil, TimeRange } from '@grafana/data';
 import { locationService } from '@grafana/runtime';
 
 // The dashboard's time picker is a URL state: `?from=…&to=…`. We read/write
@@ -15,16 +15,20 @@ export const setGlobalRange = (raw: RawTimeRange) => {
   locationService.partial({ from: fromValue, to: toValue }, true);
 };
 
+// URL params are always strings, but a digit-only string from a previous
+// write is an absolute millisecond timestamp. Pre-wrap it in a DateTime so
+// rangeUtil.convertRawToRange short-circuits to the isDateTime branch
+// instead of trying to parse it as an ISO-formatted date string.
+const parseUrlBound = (value: string): string | DateTime =>
+  /^-?\d+$/.test(value) ? dateTime(parseInt(value, 10)) : value;
+
 export const getGlobalRange = (): TimeRange => {
   // Fall back to the same default Grafana itself uses when a fresh dashboard
   // is loaded without explicit `from`/`to`.
   const params = new URLSearchParams(locationService.getSearch());
   const raw: RawTimeRange = {
-    from: params.get('from') || 'now-6h',
-    to: params.get('to') || 'now',
+    from: parseUrlBound(params.get('from') || 'now-6h'),
+    to: parseUrlBound(params.get('to') || 'now'),
   };
-  // convertRawToRange handles all four input shapes Grafana itself accepts:
-  // relative strings ('now-6h'), absolute timestamp strings, ISO strings,
-  // and DateTime instances.
   return rangeUtil.convertRawToRange(raw);
 };

@@ -1,6 +1,6 @@
 import { dateTime, TimeRange } from '@grafana/data';
 import { TimeStep } from '../types';
-import { clampToBoundary, makeTimeRange, shiftRange } from './rangeMath';
+import { clampToBoundary, makeTimeRange, shiftRange, stepToMillis } from './timeRange';
 
 const forwardCases: Array<{ value: number; unit: TimeStep['unit']; from: string; to: string; expectedFrom: string; expectedTo: string }> = [
   { value: 1, unit: 's', from: '2021-01-01T00:00:00Z', to: '2021-01-01T01:00:00Z', expectedFrom: '2021-01-01T00:00:01Z', expectedTo: '2021-01-01T01:00:01Z' },
@@ -14,7 +14,7 @@ const backwardCases: typeof forwardCases = [
   { value: 1, unit: 'h', from: '2021-01-01T00:00:00Z', to: '2021-01-01T01:00:00Z', expectedFrom: '2020-12-31T23:00:00Z', expectedTo: '2021-01-01T00:00:00Z' },
 ];
 
-describe('rangeMath', () => {
+describe('timeRange', () => {
   describe.each(forwardCases)(
     'shiftRange forward $value$unit',
     ({ value, unit, from, to, expectedFrom, expectedTo }) => {
@@ -84,6 +84,20 @@ describe('rangeMath', () => {
 
       expect(result.boundaryHit).toBe(false);
       expect(result.adjustedTimeRange).toBe(range);
+    });
+  });
+
+  describe('stepToMillis', () => {
+    it.each<[TimeStep, number]>([
+      [{ value: 1, unit: 's' }, 1_000],
+      [{ value: 30, unit: 's' }, 30_000],
+      [{ value: 1, unit: 'm' }, 60_000],
+      [{ value: 5, unit: 'm' }, 5 * 60_000],
+      [{ value: 1, unit: 'h' }, 60 * 60_000],
+      [{ value: 2, unit: 'h' }, 2 * 60 * 60_000],
+      [{ value: 1, unit: 'd' }, 24 * 60 * 60_000],
+    ])('converts %o to %i ms', (step, expected) => {
+      expect(stepToMillis(step)).toBe(expected);
     });
   });
 });
