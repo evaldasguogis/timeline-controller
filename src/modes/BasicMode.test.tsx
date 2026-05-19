@@ -17,7 +17,12 @@ jest.mock('@grafana/runtime', () => ({
       currentSearch = '?' + usp.toString();
     },
     getSearch: () => currentSearch,
+    // BasicMode subscribes to location changes so it can react when a bound
+    // dashboard variable updates. The tests don't exercise that path; an
+    // inert no-op listener is enough for the component to mount.
+    getHistory: () => ({ listen: () => () => undefined }),
   },
+  getTemplateSrv: () => ({ getVariables: () => [] }),
 }));
 
 const initialTimeRange: TimeRange = {

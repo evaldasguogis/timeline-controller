@@ -1,62 +1,65 @@
 import React from 'react';
 import { Combobox, ComboboxOption } from '@grafana/ui';
 import { defaultTimeStep, TimeStep } from '../types';
+import { IntervalVariableBinding } from '../utils/intervalVariable';
 
-// Combobox requires its values to be string | number — it can't hold object
-// values like `Select` could. So labels ('5m', '1h', …) double as the keys,
-// and we maintain a flat lookup map to convert each label to its {value, unit}
-// pair. This also gives us a canonical label per TimeStep for tooltip
-// rendering elsewhere (see `formatTimeStep`).
+// TimeStep is the canonical Grafana duration string ('5m', '1h', '1M'), so
+// the dropdown's option list is just an array of those strings — no
+// label-to-object lookup needed. Combobox values are string|number and our
+// values are strings, which lines up directly.
 
 interface Props {
   value: TimeStep;
   onChange: (value: TimeStep) => void;
   width?: number;
+  // When provided, the dropdown's options and current value come from the
+  // dashboard interval variable rather than the built-in list. The caller
+  // turns onChange into a write to the variable.
+  intervalBinding?: IntervalVariableBinding;
 }
 
-const timeStepByLabel: Record<string, TimeStep> = {
-  '1s': { value: 1, unit: 's' },
-  '5s': { value: 5, unit: 's' },
-  '10s': { value: 10, unit: 's' },
-  '30s': { value: 30, unit: 's' },
-  '1m': { value: 1, unit: 'm' },
-  '5m': { value: 5, unit: 'm' },
-  '10m': { value: 10, unit: 'm' },
-  '30m': { value: 30, unit: 'm' },
-  '1h': { value: 1, unit: 'h' },
-  '2h': { value: 2, unit: 'h' },
-  '4h': { value: 4, unit: 'h' },
-  '12h': { value: 12, unit: 'h' },
-  '1d': { value: 1, unit: 'd' },
-  '1w': { value: 1, unit: 'w' },
-  '1mo': { value: 1, unit: 'month' },
-  '3mo': { value: 3, unit: 'month' },
-  '1y': { value: 1, unit: 'y' },
-};
+// Built-in options when no interval variable is bound. Roughly the same
+// granularity Grafana's own interval defaults use, plus a few extras at the
+// short end for fine-grained scrubbing.
+const BUILT_IN_OPTIONS: TimeStep[] = [
+  '1s',
+  '5s',
+  '10s',
+  '30s',
+  '1m',
+  '5m',
+  '10m',
+  '30m',
+  '1h',
+  '2h',
+  '4h',
+  '12h',
+  '1d',
+  '1w',
+  '1M',
+  '3M',
+  '1y',
+];
 
-const options: Array<ComboboxOption<string>> = Object.keys(timeStepByLabel).map((label) => ({ label, value: label }));
+export const TimeStepDropdown: React.FC<Props> = ({ value, onChange, width = 12, intervalBinding }) => {
+  // An interval binding fully overrides the built-in list — the binding's
+  // source of truth is the dashboard variable, so we don't try to reconcile
+  // two overlapping lists.
+  const candidateSteps: TimeStep[] = intervalBinding ? intervalBinding.options : BUILT_IN_OPTIONS;
+  const selected: TimeStep =
+    (intervalBinding ? intervalBinding.current : value) ?? value ?? defaultTimeStep;
 
-const findLabel = (timeStep: TimeStep): string | undefined => {
-  const entry = Object.entries(timeStepByLabel).find(
-    ([, ts]) => ts.value === timeStep.value && ts.unit === timeStep.unit
-  );
-  return entry?.[0];
-};
-
-export const formatTimeStep = (timeStep: TimeStep): string => findLabel(timeStep) ?? `${timeStep.value}${timeStep.unit}`;
-
-export const TimeStepDropdown: React.FC<Props> = ({ value, onChange, width = 12 }) => {
-  const selectedLabel = findLabel(value ?? defaultTimeStep) ?? findLabel(defaultTimeStep);
+  const options: Array<ComboboxOption<string>> = candidateSteps.map((s) => ({ label: s, value: s }));
 
   return (
     <Combobox
       aria-label="Step size"
       options={options}
-      value={selectedLabel ?? null}
+      value={selected}
       width={width}
       onChange={(opt) => {
-        if (opt?.value && timeStepByLabel[opt.value]) {
-          onChange(timeStepByLabel[opt.value]);
+        if (opt?.value) {
+          onChange(opt.value);
         }
       }}
     />

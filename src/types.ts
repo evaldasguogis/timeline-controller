@@ -1,14 +1,15 @@
-import { DateTimeInput, DurationUnit } from '@grafana/data';
+// A step size in Grafana duration syntax: `<integer><unit-letter>`.
+// Valid units: `s` (second), `m` (minute), `h` (hour), `d` (day), `w` (week),
+// `M` (month — uppercase because lowercase `m` is minutes), `y` (year).
+// Examples: `30s`, `5m`, `1h`, `1M`, `1y`.
+//
+// Stored as the Grafana-native string so it matches what users see in the
+// dashboard's interval-variable picker and what consumer queries reference
+// (e.g. `rate(metric[$step])`). Math sites parse it on demand via
+// `parseDuration` in `utils/timeRange`.
+export type TimeStep = string;
 
-export interface TimeStep {
-  value: DateTimeInput;
-  unit: DurationUnit;
-}
-
-export const defaultTimeStep: TimeStep = {
-  value: 1,
-  unit: 'm',
-};
+export const defaultTimeStep: TimeStep = '1m';
 
 export type HorizontalAlignment = 'left' | 'center' | 'right';
 export type VerticalAlignment = 'top' | 'middle' | 'bottom';
@@ -22,6 +23,16 @@ export type VerticalAlignment = 'top' | 'middle' | 'bottom';
 export interface BasicModeOptions {
   timeStep: TimeStep;
   tickIntervalMs: number;
+  // Optional: name of a dashboard `interval` variable that drives the step
+  // picker. When set, the step dropdown reads its options and current value
+  // from that variable instead of the built-in 17-value list. Leave blank
+  // for the zero-config drop-in experience.
+  variableStep: string;
+  // Synthetic field that exists solely for Grafana's static "Used by panels"
+  // scan. Holds `${variableStep}` whenever variableStep is set, so the
+  // dashboard's variable settings page recognizes our panel as a consumer.
+  // Auto-synced from variableStep — the user never edits this directly.
+  _grafanaUsageMarker?: string;
   horizontalAlignment: HorizontalAlignment;
   verticalAlignment: VerticalAlignment;
 }
@@ -29,6 +40,7 @@ export interface BasicModeOptions {
 export const defaultBasicModeOptions: BasicModeOptions = {
   timeStep: defaultTimeStep,
   tickIntervalMs: 1000,
+  variableStep: '',
   horizontalAlignment: 'center',
   verticalAlignment: 'middle',
 };

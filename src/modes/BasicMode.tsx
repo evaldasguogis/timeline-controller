@@ -1,19 +1,23 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { css } from '@emotion/css';
 import { dateTime, GrafanaTheme2, RawTimeRange, TimeRange } from '@grafana/data';
+import { locationService } from '@grafana/runtime';
 import { Button, useStyles2 } from '@grafana/ui';
 import { HorizontalAlignment, TimeStep, TimelineControllerOptions, VerticalAlignment } from '../types';
 import { clampToBoundary, makeTimeRange, shiftRange, stepToMillis } from '../utils/timeRange';
 import { getGlobalRange, setGlobalRange } from '../utils/globalRange';
 import { formatTimeBound, toAbsoluteMs } from '../utils/timeBound';
-import { formatTimeStep, TimeStepDropdown } from '../components/TimeStepDropdown';
-import { PlaybackControls, PlaybackState } from '../components/PlaybackControls';
+import { readIntervalVariable } from '../utils/intervalVariable';
+import { setVariables } from '../utils/variables';
+import { TimeStepDropdown } from '../components/TimeStepDropdown';
+import { PlaybackControls } from '../components/PlaybackControls';
 import { useExternalTimeRangeWatcher } from '../hooks/useExternalTimeRangeWatcher';
+import { TickResult, useReplay } from '../hooks/useReplay';
 
 // Basic mode is the zero-config mode: drop the panel on any dashboard and it
 // works. It drives the dashboard's *global* time picker — every time-aware
-// panel reacts automatically. The other (future) modes write template
-// variables and require dashboard preparation; this one doesn't.
+// panel reacts automatically. The other modes write template variables and
+// require dashboard preparation; this one doesn't.
 
 interface Props {
   options: TimelineControllerOptions;
@@ -95,7 +99,6 @@ export const BasicMode: React.FC<Props> = ({ options, onOptionsChange, timeRange
   const alignItems = verticalToAlignItems[options.basic.verticalAlignment] ?? 'center';
   const styles = useStyles2((theme) => getStyles(theme, justifyContent, alignItems));
 
-  const [state, setState] = useState<PlaybackState>('paused');
   // hasStepped is an explicit "user has stepped/played away from the baseline"
   // flag, used directly for Reset's enabled state. We could derive it from a
   // current-vs-baseline range comparison, but that comparison would be fuzzy
@@ -103,24 +106,52 @@ export const BasicMode: React.FC<Props> = ({ options, onOptionsChange, timeRange
   // discrimination logic the watcher already does internally.
   const [hasStepped, setHasStepped] = useState(false);
 
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // timeStep / tickInterval live in refs so the interval callback always
-  // reads the latest values, not the closure from when setInterval started.
-  // Without this, changing either option mid-playback would have no effect
-  // until the user paused and resumed.
-  const timeStepRef = useRef<TimeStep>(options.basic.timeStep);
-  const tickIntervalMsRef = useRef<number>(options.basic.tickIntervalMs);
+  // Variable values live in the URL (`var-<name>=<value>`). Our plugin has
+  // `skipDataQuery: true`, so Grafana doesn't include us in its variable-
+  // driven re-render path — even though the `_grafanaUsageMarker` field
+  // gets us listed as "used by" in dashboard settings, no re-render is
+  // scheduled when a referenced variable changes. Subscribing to history
+  // changes is the workaround: any URL update (our own writes or external
+  // picks via Grafana's variable bar) bumps a render.
+  //
+  // Known issue: changing options in the editor sometimes leaves a blinking
+  // caret on a panel button. Cause not yet identified — see CLAUDE.local.md.
+  const [, bumpRender] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => locationService.getHistory().listen(bumpRender), []);
+
+  // Keep `_grafanaUsageMarker` in sync with `variableStep` so Grafana's
+  // static scan always sees the right `${name}` reference. The check
+  // short-circuits when already synced, so this is a no-op after the first
+  // pass (or on dashboards whose persisted JSON already matches).
+  useEffect(() => {
+    const expected = options.basic.variableStep ? `\${${options.basic.variableStep}}` : '';
+    if (options.basic._grafanaUsageMarker !== expected) {
+      onOptionsChange({
+        ...options,
+        basic: { ...options.basic, _grafanaUsageMarker: expected },
+      });
+    }
+  }, [options, onOptionsChange]);
+
+  // When the user has bound step to a dashboard interval variable, the
+  // variable's option list and current value drive the dropdown — the
+  // built-in 17-value list is bypassed. Resolves to null if the binding is
+  // blank, the variable doesn't exist, or it's the wrong type; callers fall
+  // back to options.basic.timeStep in that case.
+  const intervalBinding = readIntervalVariable(options.basic.variableStep);
+  const activeStep = intervalBinding?.current ?? options.basic.timeStep;
+
+  // timeStep lives in a ref so the onTick callback (which is wrapped in
+  // useCallback to keep useReplay's interval stable) always reads the latest
+  // value rather than a closure from when it was created.
+  const timeStepRef = useRef<TimeStep>(activeStep);
+  useEffect(() => {
+    timeStepRef.current = activeStep;
+  }, [activeStep]);
+
   // Most recent write's absolute ms — handed to the external-change watcher
   // so it can recognize prop updates that are echoes of our own writes.
   const lastWrittenAbsRef = useRef<{ from: number; to: number } | null>(null);
-
-  useEffect(() => {
-    timeStepRef.current = options.basic.timeStep;
-  }, [options.basic.timeStep]);
-
-  useEffect(() => {
-    tickIntervalMsRef.current = options.basic.tickIntervalMs;
-  }, [options.basic.tickIntervalMs]);
 
   const writeRange = useCallback((raw: RawTimeRange) => {
     lastWrittenAbsRef.current = {
@@ -130,18 +161,36 @@ export const BasicMode: React.FC<Props> = ({ options, onOptionsChange, timeRange
     setGlobalRange(raw);
   }, []);
 
-  const clearTimer = useCallback(() => {
-    if (timerRef.current !== null) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
+  const handleTick = useCallback(
+    (forward: boolean): TickResult => {
+      const { newRaw, boundaryHit } = computeShiftedRange(timeStepRef.current, forward);
+      writeRange(newRaw);
+      setHasStepped(true);
+      return { boundaryHit };
+    },
+    [writeRange]
+  );
+
+  const { state, startPlayback, pause, step } = useReplay({
+    tickIntervalMs: options.basic.tickIntervalMs,
+    onTick: handleTick,
+  });
+
+  const handleTimeStepChange = (newTimeStep: TimeStep) => {
+    if (intervalBinding) {
+      // Variable-driven: write to the dashboard variable. The URL change
+      // fires our location listener above, triggering a re-render with the
+      // updated `intervalBinding.current`.
+      setVariables({ [options.basic.variableStep]: newTimeStep });
+    } else {
+      onOptionsChange({ ...options, basic: { ...options.basic, timeStep: newTimeStep } });
     }
-  }, []);
+  };
 
   const handleExternalChange = useCallback(() => {
-    clearTimer();
-    setState('paused');
+    pause();
     setHasStepped(false);
-  }, [clearTimer]);
+  }, [pause]);
 
   const baselineRaw = useExternalTimeRangeWatcher({
     timeRange,
@@ -149,60 +198,13 @@ export const BasicMode: React.FC<Props> = ({ options, onOptionsChange, timeRange
     onExternalChange: handleExternalChange,
   });
 
-  // Stop any active interval on unmount so an out-of-tree tick can't fire
-  // (which would try to setState on an unmounted component).
-  useEffect(() => clearTimer, [clearTimer]);
-
-  const tick = useCallback(
-    (forward: boolean) => {
-      const { newRaw, boundaryHit } = computeShiftedRange(timeStepRef.current, forward);
-      writeRange(newRaw);
-      setHasStepped(true);
-      if (boundaryHit) {
-        clearTimer();
-        setState('paused');
-      }
-    },
-    [clearTimer, writeRange]
-  );
-
-  const startPlayback = useCallback(
-    (forward: boolean) => {
-      clearTimer();
-      timerRef.current = setInterval(() => tick(forward), tickIntervalMsRef.current);
-      setState(forward ? 'playing-forward' : 'playing-back');
-    },
-    [clearTimer, tick]
-  );
-
-  const handlePause = useCallback(() => {
-    clearTimer();
-    setState('paused');
-  }, [clearTimer]);
-
-  const handleStep = useCallback(
-    (forward: boolean) => {
-      // Stepping while playing is implicitly a pause + step. Otherwise the
-      // user has to pause before stepping, which feels redundant.
-      handlePause();
-      const { newRaw } = computeShiftedRange(timeStepRef.current, forward);
-      writeRange(newRaw);
-      setHasStepped(true);
-    },
-    [handlePause, writeRange]
-  );
-
   const handleReset = useCallback(() => {
-    handlePause();
+    pause();
     writeRange(baselineRaw);
     setHasStepped(false);
-  }, [handlePause, writeRange, baselineRaw]);
+  }, [pause, writeRange, baselineRaw]);
 
-  const handleTimeStepChange = (newTimeStep: TimeStep) => {
-    onOptionsChange({ ...options, basic: { ...options.basic, timeStep: newTimeStep } });
-  };
-
-  const stepMs = stepToMillis(options.basic.timeStep);
+  const stepMs = stepToMillis(activeStep);
   // Wall-clock "now" is intentionally read at render time so the forward-
   // disabled state stays current after each prop change. Date.now() is
   // impure by definition; React's purity rule is fine to suppress here —
@@ -215,27 +217,28 @@ export const BasicMode: React.FC<Props> = ({ options, onOptionsChange, timeRange
   const forwardDisabled = timeRange.to.valueOf() + stepMs >= nowMs;
   const backwardDisabled = timeRange.from.valueOf() - stepMs <= 0;
   const resetDisabled = !hasStepped;
-  const stepLabel = formatTimeStep(options.basic.timeStep);
 
   return (
     <div className={styles.wrapper}>
       <PlaybackControls
         state={state}
-        stepLabel={stepLabel}
+        stepLabel={activeStep}
         backwardDisabled={backwardDisabled}
         forwardDisabled={forwardDisabled}
         onPlayBack={() => startPlayback(false)}
-        onPause={handlePause}
+        onPause={pause}
         onPlayForward={() => startPlayback(true)}
-        onStepBack={() => handleStep(false)}
-        onStepForward={() => handleStep(true)}
+        onStepBack={() => step(false)}
+        onStepForward={() => step(true)}
       />
       <span className={styles.separator} aria-hidden="true" />
       <div className={styles.stepGroup}>
-        <span className={styles.stepLabel} id="step-label">
-          Step
-        </span>
-        <TimeStepDropdown value={options.basic.timeStep} onChange={handleTimeStepChange} />
+        <span className={styles.stepLabel}>Step</span>
+        <TimeStepDropdown
+          value={activeStep}
+          onChange={handleTimeStepChange}
+          intervalBinding={intervalBinding ?? undefined}
+        />
       </div>
       <span className={styles.separator} aria-hidden="true" />
       <Button

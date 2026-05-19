@@ -1,14 +1,13 @@
 import React from 'react';
 import { css } from '@emotion/css';
 import { ButtonGroup, ToolbarButton, useStyles2 } from '@grafana/ui';
+import { PlaybackState } from '../hooks/useReplay';
 
 // Visual choices here are anchored to Grafana's native time-range stepper
 // (the `«` / `»` next to the time picker): ButtonGroup for the connected
 // pill look, ToolbarButton for the framed-icon style, iconSize="xl" for
 // 24px glyphs, `angle-double-left/right` for the step icons. Matching the
 // native stepper makes the control feel built-in.
-
-export type PlaybackState = 'playing-back' | 'playing-forward' | 'paused';
 
 interface Props {
   state: PlaybackState;
