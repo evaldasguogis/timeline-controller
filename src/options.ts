@@ -1,6 +1,7 @@
 import { PanelOptionsEditorBuilder } from '@grafana/data';
 import {
   defaultBasicModeOptions,
+  defaultEventReplayModeOptions,
   defaultSlidingWindowModeOptions,
   defaultTimelineControllerOptions,
   Mode,
@@ -10,6 +11,7 @@ import {
 import { VariablePicker, VariablePickerSettings } from './components/VariablePicker';
 import { TimeFormatEditor, TimeFormatEditorSettings } from './components/TimeFormatEditor';
 import { ModeEditor } from './components/ModeEditor';
+import { EventBoundaryEditor } from './components/EventBoundaryEditor';
 
 // Panel-options schema. Lives in its own file so module.ts stays a thin
 // registration shell — the same split the official Grafana clock-panel uses.
@@ -20,10 +22,11 @@ import { ModeEditor } from './components/ModeEditor';
 // field's path makes its mode unambiguous.
 //
 // Category order matters: Grafana renders categories in the order their first
-// option is registered. Sliding-mode editing reads top-to-bottom as:
+// option is registered. For sliding mode the editor reads top-to-bottom as:
 //   Mode → Window variables → Step variable → Layout → Playback
-// — variables (the integration contract) live up top; Layout (what shows
-// + where it sits) and tick interval are secondary tuning knobs below.
+// For event mode "Event boundary" sits between Mode and Window variables
+// because the configured range is the option that distinguishes Event Replay
+// from Sliding Window — see it first when configuring the mode.
 
 // Description = the single-sentence "what does this do" line that shows
 // under the option name (Grafana renders it as inline plain text — no line
@@ -55,6 +58,13 @@ const WINDOW_VARIABLE_HELPER_TEXT =
 const TIMESTAMP_FORMAT_INFO =
   'Pick whatever format your data source can read in its time-filter. The preview below shows what the value actually looks like right now.';
 
+// Descriptions shared between sliding and event modes — both have the same
+// playback controls and visual elements, only the boundary source differs.
+const SHOW_PROGRESS_TRACK_DESC = 'Visual indicator of the window\'s current position.';
+const SHOW_CURRENT_VALUES_DESC = 'The textual readout of the window\'s from/to timestamps.';
+const TICK_INTERVAL_DESC =
+  'Delay between ticks while playing. Each tick re-queries every panel, so very small values can overload slow data sources.';
+
 export const buildPanelOptions = (builder: PanelOptionsEditorBuilder<TimelineControllerOptions>) => {
   builder
     .addCustomEditor<undefined, Mode>({
@@ -68,6 +78,26 @@ export const buildPanelOptions = (builder: PanelOptionsEditorBuilder<TimelineCon
       defaultValue: defaultTimelineControllerOptions.mode,
       category: ['Mode'],
       editor: ModeEditor,
+    })
+    .addCustomEditor<undefined, number>({
+      id: 'event.boundaryFrom',
+      path: 'event.boundaryFrom',
+      name: 'From',
+      description: 'Lower bound of the saved time range. Absolute timestamp.',
+      defaultValue: defaultEventReplayModeOptions.boundaryFrom,
+      category: ['Event boundary'],
+      editor: EventBoundaryEditor,
+      showIf: (config) => config.mode === 'event',
+    })
+    .addCustomEditor<undefined, number>({
+      id: 'event.boundaryTo',
+      path: 'event.boundaryTo',
+      name: 'To',
+      description: 'Upper bound of the saved time range. Absolute timestamp.',
+      defaultValue: defaultEventReplayModeOptions.boundaryTo,
+      category: ['Event boundary'],
+      editor: EventBoundaryEditor,
+      showIf: (config) => config.mode === 'event',
     })
     .addCustomEditor<VariablePickerSettings, string>({
       id: 'sliding.variableFrom',
@@ -106,6 +136,40 @@ export const buildPanelOptions = (builder: PanelOptionsEditorBuilder<TimelineCon
       },
       showIf: (config) => config.mode === 'sliding',
     })
+    .addCustomEditor<VariablePickerSettings, string>({
+      id: 'event.variableFrom',
+      path: 'event.variableFrom',
+      name: 'Lower bound to variable',
+      description: windowBoundDescription('lower'),
+      defaultValue: defaultEventReplayModeOptions.variableFrom,
+      category: ['Window variables'],
+      editor: VariablePicker,
+      settings: {
+        variableType: 'textbox',
+        createCustomValue: true,
+        helperText: WINDOW_VARIABLE_HELPER_TEXT,
+        helperTextSeverity: 'warning',
+        infoTooltip: windowBoundInfo('lower'),
+      },
+      showIf: (config) => config.mode === 'event',
+    })
+    .addCustomEditor<VariablePickerSettings, string>({
+      id: 'event.variableTo',
+      path: 'event.variableTo',
+      name: 'Upper bound to variable',
+      description: windowBoundDescription('upper'),
+      defaultValue: defaultEventReplayModeOptions.variableTo,
+      category: ['Window variables'],
+      editor: VariablePicker,
+      settings: {
+        variableType: 'textbox',
+        createCustomValue: true,
+        helperText: WINDOW_VARIABLE_HELPER_TEXT,
+        helperTextSeverity: 'warning',
+        infoTooltip: windowBoundInfo('upper'),
+      },
+      showIf: (config) => config.mode === 'event',
+    })
     .addCustomEditor<TimeFormatEditorSettings, TimeFormat>({
       id: 'sliding.timeFormat',
       path: 'sliding.timeFormat',
@@ -117,6 +181,18 @@ export const buildPanelOptions = (builder: PanelOptionsEditorBuilder<TimelineCon
       editor: TimeFormatEditor,
       settings: { infoTooltip: TIMESTAMP_FORMAT_INFO },
       showIf: (config) => config.mode === 'sliding',
+    })
+    .addCustomEditor<TimeFormatEditorSettings, TimeFormat>({
+      id: 'event.timeFormat',
+      path: 'event.timeFormat',
+      name: 'Timestamp format',
+      description:
+        'How from/to timestamps are written into the variables. Each option mirrors one of Grafana\'s $__from / $__to formatting flavors.',
+      defaultValue: defaultEventReplayModeOptions.timeFormat,
+      category: ['Window variables'],
+      editor: TimeFormatEditor,
+      settings: { infoTooltip: TIMESTAMP_FORMAT_INFO },
+      showIf: (config) => config.mode === 'event',
     })
     .addCustomEditor<VariablePickerSettings, string>({
       id: 'basic.variableStep',
@@ -150,10 +226,26 @@ export const buildPanelOptions = (builder: PanelOptionsEditorBuilder<TimelineCon
       },
       showIf: (config) => config.mode === 'sliding',
     })
+    .addCustomEditor<VariablePickerSettings, string>({
+      id: 'event.variableStep',
+      path: 'event.variableStep',
+      name: 'Step values from variable',
+      description: STEP_VARIABLE_DESCRIPTION,
+      defaultValue: defaultEventReplayModeOptions.variableStep,
+      category: ['Step variable'],
+      editor: VariablePicker,
+      settings: {
+        variableType: 'interval',
+        noneLabel: 'None — use built-in steps',
+        helperText: STEP_VARIABLE_HELPER_TEXT,
+        infoTooltip: STEP_VARIABLE_INFO,
+      },
+      showIf: (config) => config.mode === 'event',
+    })
     .addBooleanSwitch({
       path: 'sliding.showProgressTrack',
       name: 'Show progress track',
-      description: 'The bar that shows where the window sits within the dashboard\'s global range.',
+      description: SHOW_PROGRESS_TRACK_DESC,
       defaultValue: defaultSlidingWindowModeOptions.showProgressTrack,
       category: ['Layout'],
       showIf: (config) => config.mode === 'sliding',
@@ -161,38 +253,53 @@ export const buildPanelOptions = (builder: PanelOptionsEditorBuilder<TimelineCon
     .addBooleanSwitch({
       path: 'sliding.showCurrentValues',
       name: 'Show current values',
-      description: 'The textual readout of the window\'s from/to timestamps.',
+      description: SHOW_CURRENT_VALUES_DESC,
       defaultValue: defaultSlidingWindowModeOptions.showCurrentValues,
       category: ['Layout'],
       showIf: (config) => config.mode === 'sliding',
     })
+    .addBooleanSwitch({
+      path: 'event.showProgressTrack',
+      name: 'Show progress track',
+      description: SHOW_PROGRESS_TRACK_DESC,
+      defaultValue: defaultEventReplayModeOptions.showProgressTrack,
+      category: ['Layout'],
+      showIf: (config) => config.mode === 'event',
+    })
+    .addBooleanSwitch({
+      path: 'event.showCurrentValues',
+      name: 'Show current values',
+      description: SHOW_CURRENT_VALUES_DESC,
+      defaultValue: defaultEventReplayModeOptions.showCurrentValues,
+      category: ['Layout'],
+      showIf: (config) => config.mode === 'event',
+    })
     .addNumberInput({
       path: 'basic.tickIntervalMs',
       name: 'Tick interval (ms)',
-      description:
-        'Delay between ticks while playing. Each tick re-queries every panel, so very small values can overload slow data sources.',
+      description: TICK_INTERVAL_DESC,
       defaultValue: defaultBasicModeOptions.tickIntervalMs,
       category: ['Playback'],
-      settings: {
-        min: 100,
-        max: 60000,
-        integer: true,
-      },
+      settings: { min: 100, max: 60000, integer: true },
       showIf: (config) => config.mode === 'basic',
     })
     .addNumberInput({
       path: 'sliding.tickIntervalMs',
       name: 'Tick interval (ms)',
-      description:
-        'Delay between ticks while playing. Each tick re-queries every panel, so very small values can overload slow data sources.',
+      description: TICK_INTERVAL_DESC,
       defaultValue: defaultSlidingWindowModeOptions.tickIntervalMs,
       category: ['Playback'],
-      settings: {
-        min: 100,
-        max: 60000,
-        integer: true,
-      },
+      settings: { min: 100, max: 60000, integer: true },
       showIf: (config) => config.mode === 'sliding',
+    })
+    .addNumberInput({
+      path: 'event.tickIntervalMs',
+      name: 'Tick interval (ms)',
+      description: TICK_INTERVAL_DESC,
+      defaultValue: defaultEventReplayModeOptions.tickIntervalMs,
+      category: ['Playback'],
+      settings: { min: 100, max: 60000, integer: true },
+      showIf: (config) => config.mode === 'event',
     })
     .addRadio({
       path: 'basic.horizontalAlignment',
@@ -249,5 +356,33 @@ export const buildPanelOptions = (builder: PanelOptionsEditorBuilder<TimelineCon
         ],
       },
       showIf: (config) => config.mode === 'sliding',
+    })
+    .addRadio({
+      path: 'event.horizontalAlignment',
+      name: 'Horizontal alignment',
+      defaultValue: defaultEventReplayModeOptions.horizontalAlignment,
+      category: ['Layout'],
+      settings: {
+        options: [
+          { value: 'left', label: 'Left' },
+          { value: 'center', label: 'Center' },
+          { value: 'right', label: 'Right' },
+        ],
+      },
+      showIf: (config) => config.mode === 'event',
+    })
+    .addRadio({
+      path: 'event.verticalAlignment',
+      name: 'Vertical alignment',
+      defaultValue: defaultEventReplayModeOptions.verticalAlignment,
+      category: ['Layout'],
+      settings: {
+        options: [
+          { value: 'top', label: 'Top' },
+          { value: 'middle', label: 'Middle' },
+          { value: 'bottom', label: 'Bottom' },
+        ],
+      },
+      showIf: (config) => config.mode === 'event',
     });
 };

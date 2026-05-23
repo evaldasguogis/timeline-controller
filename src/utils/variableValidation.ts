@@ -1,5 +1,13 @@
 import { getTemplateSrv } from '@grafana/runtime';
-import { SlidingWindowModeOptions } from '../types';
+
+// Minimal shape needed for variable validation. Both VariableConfig
+// and EventReplayModeOptions match — the validator only cares about the
+// three variable-name fields.
+export interface VariableConfig {
+  variableFrom: string;
+  variableTo: string;
+  variableStep: string;
+}
 
 export interface VariableValidation {
   // Errors block writes — the panel can't do anything useful in this state.
@@ -28,33 +36,33 @@ interface ConfiguredVariable {
   name: string;
 }
 
-const collectConfigured = (sliding: SlidingWindowModeOptions): ConfiguredVariable[] => {
+const collectConfigured = (config: VariableConfig): ConfiguredVariable[] => {
   const out: ConfiguredVariable[] = [
-    { role: 'from', name: sliding.variableFrom },
-    { role: 'to', name: sliding.variableTo },
+    { role: 'from', name: config.variableFrom },
+    { role: 'to', name: config.variableTo },
   ];
   // Step is opt-in; only include when the user has set a name.
-  if (sliding.variableStep.trim() !== '') {
-    out.push({ role: 'step', name: sliding.variableStep });
+  if (config.variableStep.trim() !== '') {
+    out.push({ role: 'step', name: config.variableStep });
   }
   return out;
 };
 
-export const validateVariableConfig = (sliding: SlidingWindowModeOptions): VariableValidation => {
+export const validateVariableConfig = (config: VariableConfig): VariableValidation => {
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  if (sliding.variableFrom.trim() === '') {
+  if (config.variableFrom.trim() === '') {
     errors.push('Variable name "from" is required.');
   }
-  if (sliding.variableTo.trim() === '') {
+  if (config.variableTo.trim() === '') {
     errors.push('Variable name "to" is required.');
   }
 
   // Uniqueness among our three slots. Duplicates would cause one tick to
   // overwrite another's value within the same URL update, leaving the user
   // wondering why one variable never seems to change.
-  const configured = collectConfigured(sliding).filter((c) => c.name.trim() !== '');
+  const configured = collectConfigured(config).filter((c) => c.name.trim() !== '');
   const firstSeenRole = new Map<string, string>();
   for (const c of configured) {
     const seen = firstSeenRole.get(c.name);

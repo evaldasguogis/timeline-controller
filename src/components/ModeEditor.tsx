@@ -33,6 +33,12 @@ const MODES: ModeDescriptor[] = [
     summary:
       'Writes template variables that other panels reference in their queries — requires preparing the dashboard.',
   },
+  {
+    value: 'event',
+    label: 'Event Replay',
+    summary:
+      'Writes template variables across a panel-saved time range — useful for replaying a specific historical event regardless of the dashboard\'s current view.',
+  },
 ];
 
 const radioOptions = MODES.map((m) => ({ value: m.value, label: m.label }));

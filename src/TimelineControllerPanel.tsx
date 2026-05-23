@@ -3,6 +3,7 @@ import { PanelProps } from '@grafana/data';
 import { defaultTimelineControllerOptions, TimelineControllerOptions } from 'types';
 import { BasicMode } from './modes/BasicMode';
 import { SlidingWindowMode } from './modes/SlidingWindowMode';
+import { EventReplayMode } from './modes/EventReplayMode';
 
 type Props = PanelProps<TimelineControllerOptions>;
 
@@ -15,11 +16,14 @@ export const TimelineControllerPanel: React.FC<Props> = ({ options, onOptionsCha
     ...options,
     basic: { ...defaultTimelineControllerOptions.basic, ...options?.basic },
     sliding: { ...defaultTimelineControllerOptions.sliding, ...options?.sliding },
+    event: { ...defaultTimelineControllerOptions.event, ...options?.event },
   };
 
   switch (merged.mode) {
     case 'sliding':
       return <SlidingWindowMode options={merged} onOptionsChange={onOptionsChange} timeRange={timeRange} />;
+    case 'event':
+      return <EventReplayMode options={merged} onOptionsChange={onOptionsChange} />;
     case 'basic':
     default:
       return <BasicMode options={merged} onOptionsChange={onOptionsChange} timeRange={timeRange} />;

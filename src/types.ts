@@ -18,7 +18,7 @@ export type VerticalAlignment = 'top' | 'middle' | 'bottom';
 // top-level options rather than a boolean flag. Each mode has its own option
 // sub-object — they don't share defaults, and most options aren't meaningful
 // outside their own mode.
-export type Mode = 'basic' | 'sliding';
+export type Mode = 'basic' | 'sliding' | 'event';
 
 // How an absolute timestamp is encoded into the variable. Mirrors Grafana's
 // built-in $__from/$__to flavors:
@@ -113,14 +113,58 @@ export const defaultSlidingWindowModeOptions: SlidingWindowModeOptions = {
   verticalAlignment: 'middle',
 };
 
+// EventReplayMode is mechanically identical to SlidingWindow — same writes
+// every tick, same window math — except the boundary the window slides over
+// is panel-configured (`boundaryFrom`/`boundaryTo`) instead of inherited
+// from the dashboard's global time picker. Pick this when the time range
+// being replayed is a specific historical event that should stay fixed
+// regardless of the dashboard's current view.
+export interface EventReplayModeOptions {
+  timeStep: TimeStep;
+  tickIntervalMs: number;
+  // Configured boundary. Absolute Unix milliseconds; both must be > 0 and
+  // from < to for the mode to render. The DateTimePicker editor enforces
+  // pickable values; the validator catches the unset / inverted cases.
+  boundaryFrom: number;
+  boundaryTo: number;
+  variableFrom: string;
+  variableTo: string;
+  variableStep: string;
+  _variableFrom?: string;
+  _variableTo?: string;
+  _variableStep?: string;
+  timeFormat: TimeFormat;
+  showProgressTrack: boolean;
+  showCurrentValues: boolean;
+  horizontalAlignment: HorizontalAlignment;
+  verticalAlignment: VerticalAlignment;
+}
+
+export const defaultEventReplayModeOptions: EventReplayModeOptions = {
+  timeStep: defaultTimeStep,
+  tickIntervalMs: 1000,
+  boundaryFrom: 0,
+  boundaryTo: 0,
+  variableFrom: 'timeFrom',
+  variableTo: 'timeTo',
+  variableStep: '',
+  timeFormat: 'ms',
+  showProgressTrack: true,
+  showCurrentValues: true,
+  horizontalAlignment: 'center',
+  verticalAlignment: 'middle',
+};
+
 export interface TimelineControllerOptions {
   mode: Mode;
   basic: BasicModeOptions;
   sliding: SlidingWindowModeOptions;
+  event: EventReplayModeOptions;
 }
 
 export const defaultTimelineControllerOptions: TimelineControllerOptions = {
   mode: 'basic',
   basic: defaultBasicModeOptions,
   sliding: defaultSlidingWindowModeOptions,
+  event: defaultEventReplayModeOptions,
 };

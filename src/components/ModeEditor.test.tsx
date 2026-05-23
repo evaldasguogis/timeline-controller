@@ -24,16 +24,17 @@ describe('ModeEditor', () => {
     // in the always-visible summary list — so use getAllByText.
     expect(screen.getAllByText('Basic').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('Sliding Window').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Event Replay').length).toBeGreaterThanOrEqual(1);
   });
 
   it('shows a summary line for every mode (visible, not tooltip)', () => {
     renderEditor('basic');
     const list = screen.getByLabelText('Mode descriptions');
     expect(list).toBeInTheDocument();
-    // The Basic summary mentions zero setup; the Sliding Window summary
-    // mentions other panels referencing it. Spot-check each is present.
+    // Spot-check each summary's distinguishing phrase is present.
     expect(list.textContent).toContain('zero setup');
     expect(list.textContent).toContain('other panels reference');
+    expect(list.textContent).toContain('panel-saved time range');
   });
 
   it('calls onChange with the new mode when a radio is clicked', () => {
