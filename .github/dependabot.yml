@@ -70,3 +70,9 @@ updates:
     commit-message:
       prefix: 'chore(ci)'
     open-pull-requests-limit: 5
+    ignore:
+      # Actions installed by the Grafana plugin scaffold — bumps should
+      # come through `npx @grafana/create-plugin update`, same as npm.
+      - dependency-name: 'grafana/plugin-actions/*'
+      - dependency-name: 'magefile/mage-action'
+      - dependency-name: 'golangci/golangci-lint-action'
