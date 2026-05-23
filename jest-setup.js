@@ -9,3 +9,17 @@ HTMLCanvasElement.prototype.getContext = function () {
     measureText: (text) => ({ width: (text?.length ?? 0) * 8 }),
   };
 };
+
+// @grafana/ui's ScrollContainer (rendered inside Combobox when its dropdown
+// opens) constructs an IntersectionObserver. jsdom doesn't implement it. A
+// no-op stub is enough — tests don't assert on scroll-indicator visibility.
+if (typeof window.IntersectionObserver === 'undefined') {
+  window.IntersectionObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+    takeRecords() {
+      return [];
+    }
+  };
+}

@@ -38,7 +38,7 @@
           "tickIntervalMs": 1000,
           "timeStep": "5m",
           "variableStep": "step",
-          "_grafanaUsageMarker": "${step}",
+          "_variableStep": "${step}",
           "verticalAlignment": "middle"
         }
       },

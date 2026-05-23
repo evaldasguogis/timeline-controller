@@ -108,36 +108,37 @@ export const BasicMode: React.FC<Props> = ({ options, onOptionsChange, timeRange
 
   // Variable values live in the URL (`var-<name>=<value>`). Our plugin has
   // `skipDataQuery: true`, so Grafana doesn't include us in its variable-
-  // driven re-render path — even though the `_grafanaUsageMarker` field
-  // gets us listed as "used by" in dashboard settings, no re-render is
-  // scheduled when a referenced variable changes. Subscribing to history
-  // changes is the workaround: any URL update (our own writes or external
-  // picks via Grafana's variable bar) bumps a render.
+  // driven re-render path — even though the `_variableStep` field gets us
+  // listed as "used by" in dashboard settings, no re-render is scheduled
+  // when a referenced variable changes. Subscribing to history changes is
+  // the workaround: any URL update (our own writes or external picks via
+  // Grafana's variable bar) bumps a render.
   //
   // Known issue: changing options in the editor sometimes leaves a blinking
   // caret on a panel button. Cause not yet identified — see CLAUDE.local.md.
   const [, bumpRender] = useReducer((x: number) => x + 1, 0);
   useEffect(() => locationService.getHistory().listen(bumpRender), []);
 
-  // Keep `_grafanaUsageMarker` in sync with `variableStep` so Grafana's
-  // static scan always sees the right `${name}` reference. The check
-  // short-circuits when already synced, so this is a no-op after the first
-  // pass (or on dashboards whose persisted JSON already matches).
+  // Keep `_variableStep` in sync with `variableStep` so Grafana's static
+  // scan always sees the right `${name}` reference. Per-slot field (not a
+  // combined marker) means Grafana's "missing variable" hint can point
+  // straight at the broken binding. The check short-circuits when already
+  // synced, so this is a no-op after the first pass.
   useEffect(() => {
     const expected = options.basic.variableStep ? `\${${options.basic.variableStep}}` : '';
-    if (options.basic._grafanaUsageMarker !== expected) {
+    if (options.basic._variableStep !== expected) {
       onOptionsChange({
         ...options,
-        basic: { ...options.basic, _grafanaUsageMarker: expected },
+        basic: { ...options.basic, _variableStep: expected },
       });
     }
   }, [options, onOptionsChange]);
 
   // When the user has bound step to a dashboard interval variable, the
   // variable's option list and current value drive the dropdown — the
-  // built-in 17-value list is bypassed. Resolves to null if the binding is
-  // blank, the variable doesn't exist, or it's the wrong type; callers fall
-  // back to options.basic.timeStep in that case.
+  // built-in list is bypassed. Resolves to null if the binding is blank,
+  // the variable doesn't exist, or it's the wrong type; callers fall back
+  // to options.basic.timeStep in that case.
   const intervalBinding = readIntervalVariable(options.basic.variableStep);
   const activeStep = intervalBinding?.current ?? options.basic.timeStep;
 

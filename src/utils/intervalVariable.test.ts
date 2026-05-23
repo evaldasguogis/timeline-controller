@@ -1,6 +1,6 @@
 import { readIntervalVariable } from './intervalVariable';
 
-const getVariables = jest.fn<Array<unknown>, []>();
+const getVariables = jest.fn<unknown[], []>();
 let urlSearch = '';
 
 jest.mock('@grafana/runtime', () => ({
