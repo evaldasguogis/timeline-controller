@@ -113,6 +113,14 @@
       "group": "test",
       "presentation": { "panel": "shared", "reveal": "always", "clear": true },
       "problemMatcher": []
+    },
+    {
+      "label": "Scaffold: update",
+      "detail": "Refresh scaffold-managed config via @grafana/create-plugin update. Generates a diff against the current scaffold version.",
+      "type": "shell",
+      "command": "npx --yes @grafana/create-plugin@latest update",
+      "presentation": { "panel": "shared", "reveal": "always", "clear": true },
+      "problemMatcher": []
     }
   ]
 }
