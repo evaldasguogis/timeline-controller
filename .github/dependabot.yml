@@ -1,47 +1,67 @@
 version: 2
 updates:
+  # npm packages.
+  #
+  # All deps currently in package.json are scaffold-managed — bumps should
+  # happen via `npx @grafana/create-plugin update`, not piecemeal Dependabot
+  # PRs that diverge from what the scaffold maintains. The `ignore:` block
+  # below silences PRs for every scaffold-installed package. Security
+  # advisories still surface separately via GitHub's "Security" tab; they
+  # are NOT suppressed by these ignores.
+  #
+  # When you install your own deps later, they fall through to Dependabot
+  # because they won't match any of these patterns.
   - package-ecosystem: npm
     directory: '/'
     schedule:
       interval: 'weekly'
-    # Wait 5 days before updating to help circumvent supply chain attacks
+    # 5-day cooldown helps circumvent supply-chain attacks on freshly-published
+    # versions. Applies to whatever new packages you install yourself.
     cooldown:
       default-days: 5
-      # Exclude plugin-e2e to prevent false positives with canary e2e tests
-      exclude:
-        - '@grafana/plugin-e2e'
     open-pull-requests-limit: 5
     commit-message:
       prefix: 'chore'
       include: 'scope'
-    groups:
-      unit-test:
-        patterns:
-          - '@testing-library/*'
-          - 'jest*'
-          - '@types/jest'
-      eslint:
-        patterns:
-          - '@grafana/eslint-config'
-          - 'eslint*'
-          - '@typescript-eslint/*'
-          - '@stylistic/*'
-      grafana:
-        patterns:
-          - '@grafana/*'
-        dependency-type: 'production'
-        update-types:
-          - 'minor'
-          - 'patch'
-      react:
-        patterns:
-          - 'react'
-          - 'react-dom'
-          - '@types/react'
-          - '@types/react-dom'
-        update-types:
-          - 'minor'
-          - 'patch'
+    ignore:
+      # Grafana scaffold + plugin SDK
+      - dependency-name: '@grafana/*'
+      # ESLint + Prettier + style tooling
+      - dependency-name: 'eslint*'
+      - dependency-name: '@typescript-eslint/*'
+      - dependency-name: '@stylistic/*'
+      - dependency-name: 'prettier'
+      # TypeScript + ts-node
+      - dependency-name: 'typescript'
+      - dependency-name: 'ts-node'
+      # Webpack + loaders + plugins
+      - dependency-name: 'webpack*'
+      - dependency-name: '*-loader'
+      - dependency-name: '*-webpack-plugin'
+      - dependency-name: 'terser-webpack-plugin'
+      # SWC (compiler used by jest + webpack)
+      - dependency-name: '@swc/*'
+      - dependency-name: 'swc-loader'
+      # Jest + testing-library
+      - dependency-name: 'jest'
+      - dependency-name: 'jest-*'
+      - dependency-name: '@testing-library/*'
+      - dependency-name: '@types/jest'
+      # Playwright (e2e)
+      - dependency-name: '@playwright/test'
+      # React (Grafana pins compatible versions)
+      - dependency-name: 'react'
+      - dependency-name: 'react-dom'
+      - dependency-name: '@types/react'
+      - dependency-name: '@types/react-dom'
+      # Misc scaffold deps
+      - dependency-name: '@emotion/css'
+      - dependency-name: '@types/node'
+      - dependency-name: 'sass'
+      - dependency-name: 'glob'
+      - dependency-name: 'semver'
+      - dependency-name: 'identity-obj-proxy'
+      - dependency-name: 'css-loader'
 
   - package-ecosystem: 'github-actions'
     directory: '/'
