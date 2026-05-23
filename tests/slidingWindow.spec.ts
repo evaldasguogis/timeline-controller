@@ -33,7 +33,9 @@ test('Sliding Window dashboard renders transport controls and the progress track
   await expect(page.getByLabel('Pause')).toBeVisible();
   await expect(page.getByLabel('Step forward')).toBeVisible();
   await expect(page.getByLabel('Jump to start')).toBeVisible();
-  await expect(page.getByLabel('Current window')).toBeVisible();
+  // Exact match — there's also a "Current window values" readout below the
+  // bar that would otherwise match this substring locator.
+  await expect(page.getByLabel('Current window', { exact: true })).toBeVisible();
 });
 
 test('Jump to start is initially disabled (window already at left edge)', async ({
