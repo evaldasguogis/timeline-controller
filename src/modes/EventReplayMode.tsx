@@ -1,15 +1,15 @@
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { css } from '@emotion/css';
-import { dateTime, GrafanaTheme2 } from '@grafana/data';
+import { GrafanaTheme2 } from '@grafana/data';
 import { locationService } from '@grafana/runtime';
 import { Alert, Button, useStyles2 } from '@grafana/ui';
 import {
   EventReplayModeOptions,
   HorizontalAlignment,
-  TimeFormat,
   TimeStep,
   TimelineControllerOptions,
   VerticalAlignment,
+  WindowPosition,
 } from '../types';
 import { stepToMillis } from '../utils/timeRange';
 import { encodeTimeValue, setVariables, VariableValues } from '../utils/variables';
@@ -72,17 +72,6 @@ const getStyles = (theme: GrafanaTheme2, justifyContent: string, alignItems: str
     align-items: center;
     width: 100%;
   `,
-  windowReadout: css`
-    color: ${theme.colors.text.secondary};
-    font-size: ${theme.typography.bodySmall.fontSize};
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-    text-align: center;
-    // Read-only status text — keep the default arrow instead of the
-    // text-caret (I-beam) so it doesn't look like an editable field.
-    cursor: default;
-    user-select: none;
-  `,
   controlsRow: css`
     display: flex;
     flex-direction: row;
@@ -116,10 +105,18 @@ const getStyles = (theme: GrafanaTheme2, justifyContent: string, alignItems: str
   `,
 });
 
-// Initial window: anchored to the left edge of the configured boundary,
-// one timeStep wide, clamped to fit.
-const initialWindow = (boundaryFromMs: number, boundaryToMs: number, timeStep: TimeStep): WindowMs => {
+// Initial window: anchored to either edge of the configured boundary per
+// `position`, one timeStep wide, clamped to fit.
+const initialWindow = (
+  boundaryFromMs: number,
+  boundaryToMs: number,
+  timeStep: TimeStep,
+  position: WindowPosition
+): WindowMs => {
   const stepMs = stepToMillis(timeStep);
+  if (position === 'end') {
+    return { from: Math.max(boundaryFromMs, boundaryToMs - stepMs), to: boundaryToMs };
+  }
   return { from: boundaryFromMs, to: Math.min(boundaryFromMs + stepMs, boundaryToMs) };
 };
 
@@ -215,15 +212,11 @@ export const EventReplayMode: React.FC<Props> = ({ options, onOptionsChange }) =
     to: event.boundaryTo,
   });
   const currentWindowRef = useRef<WindowMs | null>(currentWindow);
-  const variableSpecRef = useRef<{
-    from: string;
-    to: string;
-    timeFormat: TimeFormat;
-  }>({
+  const variableSpecRef = useRef<{ from: string; to: string }>({
     from: event.variableFrom,
     to: event.variableTo,
-    timeFormat: event.timeFormat,
   });
+  const initialPositionRef = useRef<WindowPosition>(event.initialPosition);
 
   useEffect(() => {
     timeStepRef.current = activeStep;
@@ -238,9 +231,11 @@ export const EventReplayMode: React.FC<Props> = ({ options, onOptionsChange }) =
     variableSpecRef.current = {
       from: event.variableFrom,
       to: event.variableTo,
-      timeFormat: event.timeFormat,
     };
-  }, [event.variableFrom, event.variableTo, event.timeFormat]);
+  }, [event.variableFrom, event.variableTo]);
+  useEffect(() => {
+    initialPositionRef.current = event.initialPosition;
+  }, [event.initialPosition]);
 
   const hasErrorsRef = useRef(hasErrors);
   useEffect(() => {
@@ -253,8 +248,8 @@ export const EventReplayMode: React.FC<Props> = ({ options, onOptionsChange }) =
     }
     const spec = variableSpecRef.current;
     const values: VariableValues = {
-      [spec.from]: encodeTimeValue(win.from, spec.timeFormat),
-      [spec.to]: encodeTimeValue(win.to, spec.timeFormat),
+      [spec.from]: encodeTimeValue(win.from),
+      [spec.to]: encodeTimeValue(win.to),
     };
     setVariables(values);
   }, []);
@@ -265,7 +260,8 @@ export const EventReplayMode: React.FC<Props> = ({ options, onOptionsChange }) =
       const { from: boundaryFrom, to: boundaryTo } = boundaryRef.current;
       const stepMs = stepToMillis(ts);
 
-      const start = currentWindowRef.current ?? initialWindow(boundaryFrom, boundaryTo, ts);
+      const start =
+        currentWindowRef.current ?? initialWindow(boundaryFrom, boundaryTo, ts, initialPositionRef.current);
       const { next, boundaryHit } = shiftWindow(start, stepMs, boundaryFrom, boundaryTo, forward);
 
       setCurrentWindow(next);
@@ -281,20 +277,34 @@ export const EventReplayMode: React.FC<Props> = ({ options, onOptionsChange }) =
   });
 
   // If the user changes the boundary in panel options while playing, the
-  // existing window position no longer makes sense — drop it and pause.
+  // Seed the variables with the initial window so downstream panels never
+  // see empty bounds, and re-seed on every boundary change. The boundary is
+  // panel-configured (no dashboard-time coupling), so the prop changes
+  // suffice — no event-bus subscription needed unlike SlidingWindowMode.
   const lastBoundaryRef = useRef<{ from: number; to: number } | null>(null);
   useEffect(() => {
     const last = lastBoundaryRef.current;
+    if (
+      last !== null &&
+      last.from === event.boundaryFrom &&
+      last.to === event.boundaryTo
+    ) {
+      return;
+    }
+    const isExternalChange = last !== null;
     lastBoundaryRef.current = { from: event.boundaryFrom, to: event.boundaryTo };
-    if (last === null) {
-      return;
+    if (isExternalChange) {
+      pause();
     }
-    if (last.from === event.boundaryFrom && last.to === event.boundaryTo) {
-      return;
-    }
-    pause();
-    setCurrentWindow(null);
-  }, [event.boundaryFrom, event.boundaryTo, pause]);
+    const initial = initialWindow(
+      event.boundaryFrom,
+      event.boundaryTo,
+      timeStepRef.current,
+      initialPositionRef.current
+    );
+    setCurrentWindow(initial);
+    writeWindow(initial);
+  }, [event.boundaryFrom, event.boundaryTo, pause, writeWindow]);
 
   // When the step changes mid-session, the visible window has the old span.
   // Anchor at the existing `from` and recompute `to`; if the new span would
@@ -323,8 +333,10 @@ export const EventReplayMode: React.FC<Props> = ({ options, onOptionsChange }) =
 
   const handleJumpToStart = useCallback(() => {
     pause();
+    // Jump-to-start is always the leftmost position, independent of the
+    // configured `initialPosition`.
     const { from, to } = boundaryRef.current;
-    const start = initialWindow(from, to, timeStepRef.current);
+    const start = initialWindow(from, to, timeStepRef.current, 'start');
     writeWindow(start);
     setCurrentWindow(start);
   }, [pause, writeWindow]);
@@ -402,7 +414,7 @@ export const EventReplayMode: React.FC<Props> = ({ options, onOptionsChange }) =
   const stepMs = stepToMillis(activeStep);
   const boundarySpan = event.boundaryTo - event.boundaryFrom;
   const displayWindow =
-    currentWindow ?? initialWindow(event.boundaryFrom, event.boundaryTo, activeStep);
+    currentWindow ?? initialWindow(event.boundaryFrom, event.boundaryTo, activeStep, event.initialPosition);
   const forwardDisabled = displayWindow.to >= event.boundaryTo;
   const backwardDisabled = displayWindow.from <= event.boundaryFrom;
   const jumpToStartDisabled = backwardDisabled;
@@ -434,12 +446,6 @@ export const EventReplayMode: React.FC<Props> = ({ options, onOptionsChange }) =
             onDragStart={pause}
             onNudge={step}
           />
-        </div>
-      )}
-      {event.showCurrentValues && (
-        <div className={styles.windowReadout} aria-label="Current window values">
-          {dateTime(displayWindow.from).format('YYYY-MM-DD HH:mm:ss')} →{' '}
-          {dateTime(displayWindow.to).format('YYYY-MM-DD HH:mm:ss')}
         </div>
       )}
       <div className={styles.controlsRow}>

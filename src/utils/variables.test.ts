@@ -36,27 +36,11 @@ describe('setVariables', () => {
 describe('encodeTimeValue', () => {
   const refMs = Date.UTC(2026, 4, 16, 0, 0, 0); // 2026-05-16T00:00:00Z
 
-  it('encodes milliseconds as the raw ms integer string', () => {
-    expect(encodeTimeValue(refMs, 'ms')).toBe(String(refMs));
-  });
-
-  it('encodes seconds as a floored Unix-second string', () => {
-    expect(encodeTimeValue(refMs + 250, 's')).toBe(String(Math.floor((refMs + 250) / 1000)));
-  });
-
-  it('encodes ISO without millisecond suffix', () => {
-    expect(encodeTimeValue(refMs, 'iso')).toBe('2026-05-16T00:00:00Z');
-  });
-
-  it('floors seconds (does not round half-up)', () => {
-    expect(encodeTimeValue(1500, 's')).toBe('1');
-    expect(encodeTimeValue(1999, 's')).toBe('1');
-    expect(encodeTimeValue(2000, 's')).toBe('2');
+  it('renders Unix milliseconds as the raw integer string', () => {
+    expect(encodeTimeValue(refMs)).toBe(String(refMs));
   });
 
   it('handles epoch 0', () => {
-    expect(encodeTimeValue(0, 'ms')).toBe('0');
-    expect(encodeTimeValue(0, 's')).toBe('0');
-    expect(encodeTimeValue(0, 'iso')).toBe('1970-01-01T00:00:00Z');
+    expect(encodeTimeValue(0)).toBe('0');
   });
 });

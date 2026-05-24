@@ -77,9 +77,20 @@ describe('EventReplayMode', () => {
     expect(position.getAttribute('aria-valuetext')).toContain('2026-05-16 00:05:00');
   });
 
-  it('does not write any variables on mount', () => {
-    renderEvent();
-    expect(lastVarsCall()).toBeUndefined();
+  it('writes the initial window on mount so downstream panels never see empty bounds', () => {
+    renderEvent({ timeStep: '5m' });
+    expect(lastVarsCall()).toEqual({
+      'var-timeFrom': String(T0),
+      'var-timeTo': String(T0 + 5 * MINUTE),
+    });
+  });
+
+  it('seeds the window at the right edge when initialPosition is "end"', () => {
+    renderEvent({ timeStep: '5m', initialPosition: 'end' });
+    expect(lastVarsCall()).toEqual({
+      'var-timeFrom': String(T0 + HOUR - 5 * MINUTE),
+      'var-timeTo': String(T0 + HOUR),
+    });
   });
 
   it('Step forward writes a window shifted by one step', () => {
@@ -139,14 +150,14 @@ describe('EventReplayMode', () => {
     expect(screen.getByLabelText('Play backward')).toBeDisabled();
   });
 
-  it('encodes values in the seconds format', () => {
-    renderEvent({ timeStep: '5m', timeFormat: 's' });
+  it('encodes window bounds as Unix milliseconds', () => {
+    renderEvent({ timeStep: '5m' });
     act(() => {
       screen.getByLabelText('Step forward').click();
     });
     expect(lastVarsCall()).toEqual({
-      'var-timeFrom': String(Math.floor((T0 + 5 * MINUTE) / 1000)),
-      'var-timeTo': String(Math.floor((T0 + 10 * MINUTE) / 1000)),
+      'var-timeFrom': String(T0 + 5 * MINUTE),
+      'var-timeTo': String(T0 + 10 * MINUTE),
     });
   });
 
@@ -154,13 +165,7 @@ describe('EventReplayMode', () => {
     it('hides the progress track when showProgressTrack is false', () => {
       renderEvent({ showProgressTrack: false });
       expect(screen.queryByLabelText('Current window')).not.toBeInTheDocument();
-      expect(screen.getByLabelText('Current window values')).toBeInTheDocument();
-    });
-
-    it('hides the value readout when showCurrentValues is false', () => {
-      renderEvent({ showCurrentValues: false });
-      expect(screen.queryByLabelText('Current window values')).not.toBeInTheDocument();
-      expect(screen.getByLabelText('Current window')).toBeInTheDocument();
+      expect(screen.getByLabelText('Play forward')).toBeInTheDocument();
     });
   });
 

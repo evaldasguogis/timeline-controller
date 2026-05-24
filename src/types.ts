@@ -20,12 +20,20 @@ export type VerticalAlignment = 'top' | 'middle' | 'bottom';
 // outside their own mode.
 export type Mode = 'basic' | 'sliding' | 'event';
 
+// Where the window is anchored when sliding/event mode first seeds or
+// re-seeds after an external range change. `start` puts the window flush
+// against the lower bound (the natural "play forward from beginning"
+// position); `end` flushes it against the upper bound ("rewind from now").
+export type WindowPosition = 'start' | 'end';
+
 // How an absolute timestamp is encoded into the variable. Mirrors Grafana's
 // built-in $__from/$__to flavors:
-//   ms   — Unix milliseconds      (like `$__from`)
-//   s    — Unix seconds           (like `${__from:date:seconds}`)
-//   iso  — ISO-8601 UTC           (like `${__from:date:iso}`)
-export type TimeFormat = 'ms' | 's' | 'iso';
+// Window bounds are written to the configured template variables as Unix
+// milliseconds — matches Grafana's internal Time-field convention and lets
+// `${var:date:iso}` render the value as a readable datetime in markdown
+// panels. Consumers who need seconds (e.g. PromQL `time()` comparisons)
+// multiply `time()` by 1000 at the query site; we don't push that knob
+// into the panel surface.
 
 // timeStep and tickIntervalMs are deliberately separate concepts:
 //   timeStep      = how *much* the window moves on each tick (e.g. 5m)
@@ -90,12 +98,16 @@ export interface SlidingWindowModeOptions {
   _variableFrom?: string;
   _variableTo?: string;
   _variableStep?: string;
-  timeFormat: TimeFormat;
-  // Display toggles. Both default true; hiding them is a "transport-only"
-  // mode for users who care only about the controls and read the bounds
-  // via the consumer panels themselves.
+  // Hide the in-panel progress track for a "transport-only" mode — users who
+  // want a text readout of the bounds can wire `${variableFrom:date:iso}` /
+  // `${variableTo:date:iso}` into a Grafana text panel themselves.
   showProgressTrack: boolean;
-  showCurrentValues: boolean;
+  // Where the window lands when the mode (re)seeds on mount or after an
+  // external range change. `start` anchors at the lower bound (default,
+  // "play forward from beginning"); `end` anchors at the upper bound
+  // ("rewind from now"). Drives both the initial visual and the values
+  // first published to `timeFrom`/`timeTo`.
+  initialPosition: WindowPosition;
   horizontalAlignment: HorizontalAlignment;
   verticalAlignment: VerticalAlignment;
 }
@@ -106,9 +118,8 @@ export const defaultSlidingWindowModeOptions: SlidingWindowModeOptions = {
   variableFrom: 'timeFrom',
   variableTo: 'timeTo',
   variableStep: '',
-  timeFormat: 'ms',
   showProgressTrack: true,
-  showCurrentValues: true,
+  initialPosition: 'start',
   horizontalAlignment: 'center',
   verticalAlignment: 'middle',
 };
@@ -133,9 +144,8 @@ export interface EventReplayModeOptions {
   _variableFrom?: string;
   _variableTo?: string;
   _variableStep?: string;
-  timeFormat: TimeFormat;
   showProgressTrack: boolean;
-  showCurrentValues: boolean;
+  initialPosition: WindowPosition;
   horizontalAlignment: HorizontalAlignment;
   verticalAlignment: VerticalAlignment;
 }
@@ -148,9 +158,8 @@ export const defaultEventReplayModeOptions: EventReplayModeOptions = {
   variableFrom: 'timeFrom',
   variableTo: 'timeTo',
   variableStep: '',
-  timeFormat: 'ms',
   showProgressTrack: true,
-  showCurrentValues: true,
+  initialPosition: 'start',
   horizontalAlignment: 'center',
   verticalAlignment: 'middle',
 };

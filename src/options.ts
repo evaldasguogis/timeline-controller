@@ -1,17 +1,30 @@
-import { PanelOptionsEditorBuilder } from '@grafana/data';
+import { PanelOptionsEditorBuilder, SelectableValue } from '@grafana/data';
 import {
   defaultBasicModeOptions,
   defaultEventReplayModeOptions,
   defaultSlidingWindowModeOptions,
   defaultTimelineControllerOptions,
+  HorizontalAlignment,
   Mode,
-  TimeFormat,
   TimelineControllerOptions,
+  VerticalAlignment,
 } from './types';
 import { VariablePicker, VariablePickerSettings } from './components/VariablePicker';
-import { TimeFormatEditor, TimeFormatEditorSettings } from './components/TimeFormatEditor';
 import { ModeEditor } from './components/ModeEditor';
 import { EventBoundaryEditor } from './components/EventBoundaryEditor';
+import { FullWidthRadioEditor, FullWidthRadioSettings } from './components/FullWidthRadioEditor';
+
+const HORIZONTAL_ALIGNMENT_OPTIONS: Array<SelectableValue<HorizontalAlignment>> = [
+  { value: 'left', label: 'Left' },
+  { value: 'center', label: 'Center' },
+  { value: 'right', label: 'Right' },
+];
+
+const VERTICAL_ALIGNMENT_OPTIONS: Array<SelectableValue<VerticalAlignment>> = [
+  { value: 'top', label: 'Top' },
+  { value: 'middle', label: 'Middle' },
+  { value: 'bottom', label: 'Bottom' },
+];
 
 // Panel-options schema. Lives in its own file so module.ts stays a thin
 // registration shell — the same split the official Grafana clock-panel uses.
@@ -23,7 +36,7 @@ import { EventBoundaryEditor } from './components/EventBoundaryEditor';
 //
 // Category order matters: Grafana renders categories in the order their first
 // option is registered. For sliding mode the editor reads top-to-bottom as:
-//   Mode → Window variables → Step variable → Layout → Playback
+//   Mode → Window variables → Step variable → Playback → Layout
 // For event mode "Event boundary" sits between Mode and Window variables
 // because the configured range is the option that distinguishes Event Replay
 // from Sliding Window — see it first when configuring the mode.
@@ -55,13 +68,9 @@ const windowBoundInfo = (bound: 'lower' | 'upper') =>
 const WINDOW_VARIABLE_HELPER_TEXT =
   'Create one in Dashboard settings → Variables (type: Textbox).';
 
-const TIMESTAMP_FORMAT_INFO =
-  'Pick whatever format your data source can read in its time-filter. The preview below shows what the value actually looks like right now.';
-
 // Descriptions shared between sliding and event modes — both have the same
 // playback controls and visual elements, only the boundary source differs.
 const SHOW_PROGRESS_TRACK_DESC = 'Visual indicator of the window\'s current position.';
-const SHOW_CURRENT_VALUES_DESC = 'The textual readout of the window\'s from/to timestamps.';
 const TICK_INTERVAL_DESC =
   'Delay between ticks while playing. Each tick re-queries every panel, so very small values can overload slow data sources.';
 
@@ -170,30 +179,6 @@ export const buildPanelOptions = (builder: PanelOptionsEditorBuilder<TimelineCon
       },
       showIf: (config) => config.mode === 'event',
     })
-    .addCustomEditor<TimeFormatEditorSettings, TimeFormat>({
-      id: 'sliding.timeFormat',
-      path: 'sliding.timeFormat',
-      name: 'Timestamp format',
-      description:
-        'How from/to timestamps are written into the variables. Each option mirrors one of Grafana\'s $__from / $__to formatting flavors.',
-      defaultValue: defaultSlidingWindowModeOptions.timeFormat,
-      category: ['Window variables'],
-      editor: TimeFormatEditor,
-      settings: { infoTooltip: TIMESTAMP_FORMAT_INFO },
-      showIf: (config) => config.mode === 'sliding',
-    })
-    .addCustomEditor<TimeFormatEditorSettings, TimeFormat>({
-      id: 'event.timeFormat',
-      path: 'event.timeFormat',
-      name: 'Timestamp format',
-      description:
-        'How from/to timestamps are written into the variables. Each option mirrors one of Grafana\'s $__from / $__to formatting flavors.',
-      defaultValue: defaultEventReplayModeOptions.timeFormat,
-      category: ['Window variables'],
-      editor: TimeFormatEditor,
-      settings: { infoTooltip: TIMESTAMP_FORMAT_INFO },
-      showIf: (config) => config.mode === 'event',
-    })
     .addCustomEditor<VariablePickerSettings, string>({
       id: 'basic.variableStep',
       path: 'basic.variableStep',
@@ -242,36 +227,38 @@ export const buildPanelOptions = (builder: PanelOptionsEditorBuilder<TimelineCon
       },
       showIf: (config) => config.mode === 'event',
     })
-    .addBooleanSwitch({
-      path: 'sliding.showProgressTrack',
-      name: 'Show progress track',
-      description: SHOW_PROGRESS_TRACK_DESC,
-      defaultValue: defaultSlidingWindowModeOptions.showProgressTrack,
-      category: ['Layout'],
+    // Playback category — registered before Layout so Grafana renders it
+    // first in the sidebar (categories appear in first-touch order).
+    .addCustomEditor<FullWidthRadioSettings<'start' | 'end'>, 'start' | 'end'>({
+      id: 'sliding.initialPosition',
+      path: 'sliding.initialPosition',
+      name: 'Initial window position',
+      description: 'Where the window lands on mount and after the dashboard range changes.',
+      defaultValue: defaultSlidingWindowModeOptions.initialPosition,
+      category: ['Playback'],
+      editor: FullWidthRadioEditor,
+      settings: {
+        options: [
+          { value: 'start', label: 'Start' },
+          { value: 'end', label: 'End' },
+        ],
+      },
       showIf: (config) => config.mode === 'sliding',
     })
-    .addBooleanSwitch({
-      path: 'sliding.showCurrentValues',
-      name: 'Show current values',
-      description: SHOW_CURRENT_VALUES_DESC,
-      defaultValue: defaultSlidingWindowModeOptions.showCurrentValues,
-      category: ['Layout'],
-      showIf: (config) => config.mode === 'sliding',
-    })
-    .addBooleanSwitch({
-      path: 'event.showProgressTrack',
-      name: 'Show progress track',
-      description: SHOW_PROGRESS_TRACK_DESC,
-      defaultValue: defaultEventReplayModeOptions.showProgressTrack,
-      category: ['Layout'],
-      showIf: (config) => config.mode === 'event',
-    })
-    .addBooleanSwitch({
-      path: 'event.showCurrentValues',
-      name: 'Show current values',
-      description: SHOW_CURRENT_VALUES_DESC,
-      defaultValue: defaultEventReplayModeOptions.showCurrentValues,
-      category: ['Layout'],
+    .addCustomEditor<FullWidthRadioSettings<'start' | 'end'>, 'start' | 'end'>({
+      id: 'event.initialPosition',
+      path: 'event.initialPosition',
+      name: 'Initial window position',
+      description: 'Where the window lands on mount and after the boundary changes.',
+      defaultValue: defaultEventReplayModeOptions.initialPosition,
+      category: ['Playback'],
+      editor: FullWidthRadioEditor,
+      settings: {
+        options: [
+          { value: 'start', label: 'Start' },
+          { value: 'end', label: 'End' },
+        ],
+      },
       showIf: (config) => config.mode === 'event',
     })
     .addNumberInput({
@@ -301,88 +288,81 @@ export const buildPanelOptions = (builder: PanelOptionsEditorBuilder<TimelineCon
       settings: { min: 100, max: 60000, integer: true },
       showIf: (config) => config.mode === 'event',
     })
-    .addRadio({
+    // Layout category — visibility and alignment toggles, registered last.
+    .addBooleanSwitch({
+      path: 'sliding.showProgressTrack',
+      name: 'Show progress track',
+      description: SHOW_PROGRESS_TRACK_DESC,
+      defaultValue: defaultSlidingWindowModeOptions.showProgressTrack,
+      category: ['Layout'],
+      showIf: (config) => config.mode === 'sliding',
+    })
+    .addBooleanSwitch({
+      path: 'event.showProgressTrack',
+      name: 'Show progress track',
+      description: SHOW_PROGRESS_TRACK_DESC,
+      defaultValue: defaultEventReplayModeOptions.showProgressTrack,
+      category: ['Layout'],
+      showIf: (config) => config.mode === 'event',
+    })
+    .addCustomEditor<FullWidthRadioSettings<HorizontalAlignment>, HorizontalAlignment>({
+      id: 'basic.horizontalAlignment',
       path: 'basic.horizontalAlignment',
       name: 'Horizontal alignment',
       defaultValue: defaultBasicModeOptions.horizontalAlignment,
       category: ['Layout'],
-      settings: {
-        options: [
-          { value: 'left', label: 'Left' },
-          { value: 'center', label: 'Center' },
-          { value: 'right', label: 'Right' },
-        ],
-      },
+      editor: FullWidthRadioEditor,
+      settings: { options: HORIZONTAL_ALIGNMENT_OPTIONS },
       showIf: (config) => config.mode === 'basic',
     })
-    .addRadio({
+    .addCustomEditor<FullWidthRadioSettings<VerticalAlignment>, VerticalAlignment>({
+      id: 'basic.verticalAlignment',
       path: 'basic.verticalAlignment',
       name: 'Vertical alignment',
       defaultValue: defaultBasicModeOptions.verticalAlignment,
       category: ['Layout'],
-      settings: {
-        options: [
-          { value: 'top', label: 'Top' },
-          { value: 'middle', label: 'Middle' },
-          { value: 'bottom', label: 'Bottom' },
-        ],
-      },
+      editor: FullWidthRadioEditor,
+      settings: { options: VERTICAL_ALIGNMENT_OPTIONS },
       showIf: (config) => config.mode === 'basic',
     })
-    .addRadio({
+    .addCustomEditor<FullWidthRadioSettings<HorizontalAlignment>, HorizontalAlignment>({
+      id: 'sliding.horizontalAlignment',
       path: 'sliding.horizontalAlignment',
       name: 'Horizontal alignment',
       defaultValue: defaultSlidingWindowModeOptions.horizontalAlignment,
       category: ['Layout'],
-      settings: {
-        options: [
-          { value: 'left', label: 'Left' },
-          { value: 'center', label: 'Center' },
-          { value: 'right', label: 'Right' },
-        ],
-      },
+      editor: FullWidthRadioEditor,
+      settings: { options: HORIZONTAL_ALIGNMENT_OPTIONS },
       showIf: (config) => config.mode === 'sliding',
     })
-    .addRadio({
+    .addCustomEditor<FullWidthRadioSettings<VerticalAlignment>, VerticalAlignment>({
+      id: 'sliding.verticalAlignment',
       path: 'sliding.verticalAlignment',
       name: 'Vertical alignment',
       defaultValue: defaultSlidingWindowModeOptions.verticalAlignment,
       category: ['Layout'],
-      settings: {
-        options: [
-          { value: 'top', label: 'Top' },
-          { value: 'middle', label: 'Middle' },
-          { value: 'bottom', label: 'Bottom' },
-        ],
-      },
+      editor: FullWidthRadioEditor,
+      settings: { options: VERTICAL_ALIGNMENT_OPTIONS },
       showIf: (config) => config.mode === 'sliding',
     })
-    .addRadio({
+    .addCustomEditor<FullWidthRadioSettings<HorizontalAlignment>, HorizontalAlignment>({
+      id: 'event.horizontalAlignment',
       path: 'event.horizontalAlignment',
       name: 'Horizontal alignment',
       defaultValue: defaultEventReplayModeOptions.horizontalAlignment,
       category: ['Layout'],
-      settings: {
-        options: [
-          { value: 'left', label: 'Left' },
-          { value: 'center', label: 'Center' },
-          { value: 'right', label: 'Right' },
-        ],
-      },
+      editor: FullWidthRadioEditor,
+      settings: { options: HORIZONTAL_ALIGNMENT_OPTIONS },
       showIf: (config) => config.mode === 'event',
     })
-    .addRadio({
+    .addCustomEditor<FullWidthRadioSettings<VerticalAlignment>, VerticalAlignment>({
+      id: 'event.verticalAlignment',
       path: 'event.verticalAlignment',
       name: 'Vertical alignment',
       defaultValue: defaultEventReplayModeOptions.verticalAlignment,
       category: ['Layout'],
-      settings: {
-        options: [
-          { value: 'top', label: 'Top' },
-          { value: 'middle', label: 'Middle' },
-          { value: 'bottom', label: 'Bottom' },
-        ],
-      },
+      editor: FullWidthRadioEditor,
+      settings: { options: VERTICAL_ALIGNMENT_OPTIONS },
       showIf: (config) => config.mode === 'event',
     });
 };

@@ -21,6 +21,18 @@ jest.mock('@grafana/runtime', () => ({
     getHistory: () => ({ listen }),
   },
   getTemplateSrv: () => ({ getVariables: () => dashboardVariables }),
+  // Minimal stub — the event bus is consumed via `subscribe(EventClass, fn)`
+  // which returns an unsubscribe handle. Tests don't dispatch events; they
+  // only need the subscription to no-op.
+  getAppEvents: () => ({
+    subscribe: () => ({ unsubscribe: () => undefined }),
+  }),
+  RefreshEvent: class RefreshEvent {
+    static type = 'refresh';
+  },
+  TimeRangeUpdatedEvent: class TimeRangeUpdatedEvent {
+    static type = 'time-range-updated';
+  },
 }));
 
 const T0 = Date.UTC(2026, 4, 16, 0, 0, 0); // 2026-05-16T00:00:00Z
@@ -96,9 +108,20 @@ describe('SlidingWindowMode', () => {
     expect(position.getAttribute('aria-valuetext')).toContain('2026-05-16 00:05:00');
   });
 
-  it('does not write any window variables on mount', () => {
-    renderSliding();
-    expect(lastVarsCall()).toBeUndefined();
+  it('writes the initial window on mount so downstream panels never see empty bounds', () => {
+    renderSliding({ timeStep: '5m' });
+    expect(lastVarsCall()).toEqual({
+      'var-timeFrom': String(T0),
+      'var-timeTo': String(T0 + 5 * MINUTE),
+    });
+  });
+
+  it('seeds the window at the right edge when initialPosition is "end"', () => {
+    renderSliding({ timeStep: '5m', initialPosition: 'end' });
+    expect(lastVarsCall()).toEqual({
+      'var-timeFrom': String(T0 + HOUR - 5 * MINUTE),
+      'var-timeTo': String(T0 + HOUR),
+    });
   });
 
   it('Jump to start is initially disabled (window already at left edge)', () => {
@@ -238,29 +261,16 @@ describe('SlidingWindowMode', () => {
     expect(Object.keys(vars!)).toEqual(['var-windowStart', 'var-windowEnd']);
   });
 
-  it('encodes values in the seconds format', () => {
-    renderSliding({ timeStep: '5m', timeFormat: 's' });
+  it('encodes window bounds as Unix milliseconds', () => {
+    renderSliding({ timeStep: '5m' });
 
     act(() => {
       screen.getByLabelText('Step forward').click();
     });
 
     expect(lastVarsCall()).toEqual({
-      'var-timeFrom': String(Math.floor((T0 + 5 * MINUTE) / 1000)),
-      'var-timeTo': String(Math.floor((T0 + 10 * MINUTE) / 1000)),
-    });
-  });
-
-  it('encodes values in the ISO format', () => {
-    renderSliding({ timeStep: '5m', timeFormat: 'iso' });
-
-    act(() => {
-      screen.getByLabelText('Step forward').click();
-    });
-
-    expect(lastVarsCall()).toEqual({
-      'var-timeFrom': '2026-05-16T00:05:00Z',
-      'var-timeTo': '2026-05-16T00:10:00Z',
+      'var-timeFrom': String(T0 + 5 * MINUTE),
+      'var-timeTo': String(T0 + 10 * MINUTE),
     });
   });
 
@@ -342,30 +352,14 @@ describe('SlidingWindowMode', () => {
   });
 
   describe('display toggles', () => {
-    it('renders the progress track and value readout by default', () => {
+    it('renders the progress track by default', () => {
       renderSliding();
       expect(screen.getByLabelText('Current window')).toBeInTheDocument();
-      expect(screen.getByLabelText('Current window values')).toBeInTheDocument();
     });
 
-    it('hides the progress track when showProgressTrack is false', () => {
+    it('hides the progress track when showProgressTrack is false; transport controls remain', () => {
       renderSliding({ showProgressTrack: false });
       expect(screen.queryByLabelText('Current window')).not.toBeInTheDocument();
-      // Readout still shows; controls still present.
-      expect(screen.getByLabelText('Current window values')).toBeInTheDocument();
-      expect(screen.getByLabelText('Play forward')).toBeInTheDocument();
-    });
-
-    it('hides the value readout when showCurrentValues is false', () => {
-      renderSliding({ showCurrentValues: false });
-      expect(screen.queryByLabelText('Current window values')).not.toBeInTheDocument();
-      expect(screen.getByLabelText('Current window')).toBeInTheDocument();
-    });
-
-    it('hides both when both toggles are off — only transport controls remain', () => {
-      renderSliding({ showProgressTrack: false, showCurrentValues: false });
-      expect(screen.queryByLabelText('Current window')).not.toBeInTheDocument();
-      expect(screen.queryByLabelText('Current window values')).not.toBeInTheDocument();
       expect(screen.getByLabelText('Play forward')).toBeInTheDocument();
     });
   });

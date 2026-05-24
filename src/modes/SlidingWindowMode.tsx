@@ -1,15 +1,15 @@
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { css } from '@emotion/css';
-import { dateTime, GrafanaTheme2, TimeRange } from '@grafana/data';
-import { locationService } from '@grafana/runtime';
+import { GrafanaTheme2, TimeRange } from '@grafana/data';
+import { getAppEvents, locationService, RefreshEvent, TimeRangeUpdatedEvent } from '@grafana/runtime';
 import { Alert, Button, useStyles2 } from '@grafana/ui';
 import {
   HorizontalAlignment,
   SlidingWindowModeOptions,
-  TimeFormat,
   TimeStep,
   TimelineControllerOptions,
   VerticalAlignment,
+  WindowPosition,
 } from '../types';
 import { stepToMillis } from '../utils/timeRange';
 import { encodeTimeValue, setVariables, VariableValues } from '../utils/variables';
@@ -71,21 +71,6 @@ const getStyles = (theme: GrafanaTheme2, justifyContent: string, alignItems: str
     align-items: center;
     width: 100%;
   `,
-  // Inline readout of the window's exact bounds. The progress bar gives
-  // visual orientation but resolving the exact window position from a bar
-  // alone requires hovering — keeping the numeric form always-visible
-  // means the user (and anyone watching their screen) can read both at once.
-  windowReadout: css`
-    color: ${theme.colors.text.secondary};
-    font-size: ${theme.typography.bodySmall.fontSize};
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-    // Read-only status text — keep the default arrow instead of the
-    // text-caret (I-beam) so it doesn't look like an editable field.
-    cursor: default;
-    user-select: none;
-    text-align: center;
-  `,
   controlsRow: css`
     display: flex;
     flex-direction: row;
@@ -121,14 +106,21 @@ const getStyles = (theme: GrafanaTheme2, justifyContent: string, alignItems: str
   `,
 });
 
-// Compute the initial window: anchored to the left edge of the dashboard's
-// global range, one timeStep wide, clamped to fit. Pulling this out makes the
-// "where we reset to" target explicit and shared between first-tick logic and
-// jump-to-start.
-const initialWindow = (boundary: TimeRange, timeStep: TimeStep): WindowMs => {
+// Compute the initial window: anchored to either edge of the dashboard's
+// global range per `position`, one timeStep wide, clamped to fit. Pulling
+// this out makes the "where we reset to" target explicit and shared between
+// first-tick logic and jump-to-start.
+const initialWindow = (
+  boundary: TimeRange,
+  timeStep: TimeStep,
+  position: WindowPosition
+): WindowMs => {
   const fromMs = boundary.from.valueOf();
   const toMs = boundary.to.valueOf();
   const stepMs = stepToMillis(timeStep);
+  if (position === 'end') {
+    return { from: Math.max(fromMs, toMs - stepMs), to: toMs };
+  }
   return { from: fromMs, to: Math.min(fromMs + stepMs, toMs) };
 };
 
@@ -236,15 +228,11 @@ export const SlidingWindowMode: React.FC<Props> = ({ options, onOptionsChange, t
   const timeStepRef = useRef<TimeStep>(activeStep);
   const timeRangeRef = useRef<TimeRange>(timeRange);
   const currentWindowRef = useRef<WindowMs | null>(currentWindow);
-  const variableSpecRef = useRef<{
-    from: string;
-    to: string;
-    timeFormat: TimeFormat;
-  }>({
+  const variableSpecRef = useRef<{ from: string; to: string }>({
     from: sliding.variableFrom,
     to: sliding.variableTo,
-    timeFormat: sliding.timeFormat,
   });
+  const initialPositionRef = useRef<WindowPosition>(sliding.initialPosition);
 
   useEffect(() => {
     timeStepRef.current = activeStep;
@@ -259,9 +247,11 @@ export const SlidingWindowMode: React.FC<Props> = ({ options, onOptionsChange, t
     variableSpecRef.current = {
       from: sliding.variableFrom,
       to: sliding.variableTo,
-      timeFormat: sliding.timeFormat,
     };
-  }, [sliding.variableFrom, sliding.variableTo, sliding.timeFormat]);
+  }, [sliding.variableFrom, sliding.variableTo]);
+  useEffect(() => {
+    initialPositionRef.current = sliding.initialPosition;
+  }, [sliding.initialPosition]);
 
   // Guard writes against an invalid config — bound to a ref so the closure
   // captured by useReplay's interval picks up the latest validity without
@@ -281,8 +271,8 @@ export const SlidingWindowMode: React.FC<Props> = ({ options, onOptionsChange, t
     }
     const spec = variableSpecRef.current;
     const values: VariableValues = {
-      [spec.from]: encodeTimeValue(win.from, spec.timeFormat),
-      [spec.to]: encodeTimeValue(win.to, spec.timeFormat),
+      [spec.from]: encodeTimeValue(win.from),
+      [spec.to]: encodeTimeValue(win.to),
     };
     setVariables(values);
   }, []);
@@ -295,7 +285,7 @@ export const SlidingWindowMode: React.FC<Props> = ({ options, onOptionsChange, t
       const boundaryTo = tr.to.valueOf();
       const stepMs = stepToMillis(ts);
 
-      const start = currentWindowRef.current ?? initialWindow(tr, ts);
+      const start = currentWindowRef.current ?? initialWindow(tr, ts, initialPositionRef.current);
       const { next, boundaryHit } = shiftWindow(start, stepMs, boundaryFrom, boundaryTo, forward);
 
       setCurrentWindow(next);
@@ -312,24 +302,54 @@ export const SlidingWindowMode: React.FC<Props> = ({ options, onOptionsChange, t
 
   // Detect external changes to the dashboard's global range (the boundary).
   // When the user picks a new range via the global time picker, our existing
-  // window position no longer makes sense — drop it and pause. We skip the
-  // very first render (no "external" change has happened yet, that's just
-  // mount).
+  // Seed the variables with the initial window so downstream panels never
+  // see empty bounds, and re-seed on every external time range change.
+  // Two channels feed this: the timeRange prop (handles initial mount and
+  // any re-renders Grafana does itself) and Grafana's TimeRangeUpdatedEvent
+  // (covers manual time-picker changes that may not re-render this panel
+  // because of skipDataQuery). RefreshEvent covers auto-refresh ticks for
+  // relative ranges (`now-3h`) where the absolute bounds shift each tick.
+  // Both event paths read the fresh range from `getTemplateSrv()`-adjacent
+  // sources rather than the (potentially stale) prop.
   const lastBoundaryMsRef = useRef<{ from: number; to: number } | null>(null);
+  const seedWindow = useCallback(
+    (tr: TimeRange) => {
+      const fromMs = tr.from.valueOf();
+      const toMs = tr.to.valueOf();
+      const last = lastBoundaryMsRef.current;
+      if (last !== null && last.from === fromMs && last.to === toMs) {
+        return;
+      }
+      const isExternalChange = last !== null;
+      lastBoundaryMsRef.current = { from: fromMs, to: toMs };
+      if (isExternalChange) {
+        pause();
+      }
+      const initial = initialWindow(tr, timeStepRef.current, initialPositionRef.current);
+      setCurrentWindow(initial);
+      writeWindow(initial);
+    },
+    [pause, writeWindow]
+  );
+
+  // Initial seed + prop-driven re-seed.
   useEffect(() => {
-    const fromMs = timeRange.from.valueOf();
-    const toMs = timeRange.to.valueOf();
-    const last = lastBoundaryMsRef.current;
-    lastBoundaryMsRef.current = { from: fromMs, to: toMs };
-    if (last === null) {
-      return;
-    }
-    if (last.from === fromMs && last.to === toMs) {
-      return;
-    }
-    pause();
-    setCurrentWindow(null);
-  }, [timeRange, pause]);
+    seedWindow(timeRange);
+  }, [timeRange, seedWindow]);
+
+  // Event-driven re-seed for picker changes and auto-refresh of relative
+  // ranges (skipDataQuery may otherwise leave the prop stale).
+  useEffect(() => {
+    const appEvents = getAppEvents();
+    const onTimeRangeUpdated = (event: TimeRangeUpdatedEvent) => seedWindow(event.payload);
+    const onRefresh = () => seedWindow(timeRangeRef.current);
+    const sub1 = appEvents.subscribe(TimeRangeUpdatedEvent, onTimeRangeUpdated);
+    const sub2 = appEvents.subscribe(RefreshEvent, onRefresh);
+    return () => {
+      sub1.unsubscribe();
+      sub2.unsubscribe();
+    };
+  }, [seedWindow]);
 
   // When the step changes mid-session, the visible window has the old span.
   // Anchor at the existing `from` and recompute `to`; if the new span would
@@ -363,7 +383,9 @@ export const SlidingWindowMode: React.FC<Props> = ({ options, onOptionsChange, t
   // does (otherwise the next tick would immediately move off the edge).
   const handleJumpToStart = useCallback(() => {
     pause();
-    const start = initialWindow(timeRangeRef.current, timeStepRef.current);
+    // Jump-to-start always means the leftmost position, independent of the
+    // configured `initialPosition` (which only controls where seeding lands).
+    const start = initialWindow(timeRangeRef.current, timeStepRef.current, 'start');
     writeWindow(start);
     setCurrentWindow(start);
   }, [pause, writeWindow]);
@@ -427,7 +449,7 @@ export const SlidingWindowMode: React.FC<Props> = ({ options, onOptionsChange, t
   };
 
   const stepMs = stepToMillis(activeStep);
-  const displayWindow = currentWindow ?? initialWindow(timeRange, activeStep);
+  const displayWindow = currentWindow ?? initialWindow(timeRange, activeStep, sliding.initialPosition);
   const forwardDisabled = displayWindow.to >= timeRange.to.valueOf();
   const backwardDisabled = displayWindow.from <= timeRange.from.valueOf();
   // Jumps reuse the same edge checks — being at the left edge means jump-to-
@@ -490,12 +512,6 @@ export const SlidingWindowMode: React.FC<Props> = ({ options, onOptionsChange, t
             onDragStart={pause}
             onNudge={step}
           />
-        </div>
-      )}
-      {sliding.showCurrentValues && (
-        <div className={styles.windowReadout} aria-label="Current window values">
-          {dateTime(displayWindow.from).format('YYYY-MM-DD HH:mm:ss')} →{' '}
-          {dateTime(displayWindow.to).format('YYYY-MM-DD HH:mm:ss')}
         </div>
       )}
       <div className={styles.controlsRow}>
