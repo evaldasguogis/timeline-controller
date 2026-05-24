@@ -331,6 +331,33 @@ export const SlidingWindowMode: React.FC<Props> = ({ options, onOptionsChange, t
     setCurrentWindow(null);
   }, [timeRange, pause]);
 
+  // When the step changes mid-session, the visible window has the old span.
+  // Anchor at the existing `from` and recompute `to`; if the new span would
+  // overshoot the boundary, shift `from` left so the window still fits.
+  // Also republish — the downstream panels need the resized window.
+  useEffect(() => {
+    const cw = currentWindowRef.current;
+    if (cw === null) {
+      return;
+    }
+    const tr = timeRangeRef.current;
+    const stepMs = stepToMillis(activeStep);
+    const boundaryFromMs = tr.from.valueOf();
+    const boundaryToMs = tr.to.valueOf();
+    let from = cw.from;
+    let to = from + stepMs;
+    if (to > boundaryToMs) {
+      to = boundaryToMs;
+      from = Math.max(boundaryFromMs, to - stepMs);
+    }
+    if (from === cw.from && to === cw.to) {
+      return;
+    }
+    const next: WindowMs = { from, to };
+    setCurrentWindow(next);
+    writeWindow(next);
+  }, [activeStep, writeWindow]);
+
   // Snap the window to the boundary's edges. Both pause first — jumping
   // implicitly stops any active playback for the same reason a manual step
   // does (otherwise the next tick would immediately move off the edge).

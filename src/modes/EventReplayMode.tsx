@@ -296,6 +296,31 @@ export const EventReplayMode: React.FC<Props> = ({ options, onOptionsChange }) =
     setCurrentWindow(null);
   }, [event.boundaryFrom, event.boundaryTo, pause]);
 
+  // When the step changes mid-session, the visible window has the old span.
+  // Anchor at the existing `from` and recompute `to`; if the new span would
+  // overshoot the boundary, shift `from` left so the window still fits.
+  // Also republish — the downstream panels need the resized window.
+  useEffect(() => {
+    const cw = currentWindowRef.current;
+    if (cw === null) {
+      return;
+    }
+    const { from: boundaryFromMs, to: boundaryToMs } = boundaryRef.current;
+    const stepMs = stepToMillis(activeStep);
+    let from = cw.from;
+    let to = from + stepMs;
+    if (to > boundaryToMs) {
+      to = boundaryToMs;
+      from = Math.max(boundaryFromMs, to - stepMs);
+    }
+    if (from === cw.from && to === cw.to) {
+      return;
+    }
+    const next: WindowMs = { from, to };
+    setCurrentWindow(next);
+    writeWindow(next);
+  }, [activeStep, writeWindow]);
+
   const handleJumpToStart = useCallback(() => {
     pause();
     const { from, to } = boundaryRef.current;
