@@ -1,7 +1,8 @@
 import React from 'react';
 import { act, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { dateTime, TimeRange } from '@grafana/data';
+import { dateTime, EventBusSrv, TimeRange } from '@grafana/data';
+import { TimeRangeUpdatedEvent } from '@grafana/runtime';
 import { defaultTimelineControllerOptions, TimelineControllerOptions } from '../types';
 import { BasicMode } from './BasicMode';
 
@@ -23,6 +24,18 @@ jest.mock('@grafana/runtime', () => ({
     getHistory: () => ({ listen: () => () => undefined }),
   },
   getTemplateSrv: () => ({ getVariables: () => [] }),
+  // Real EventBusSrv matches events by static `type`, so a mock class
+  // with the right type string is sufficient — useExternalTimeRangeWatcher
+  // subscribes via this class reference and the real bus delivers events
+  // whose `.type` matches.
+  TimeRangeUpdatedEvent: class TimeRangeUpdatedEvent {
+    static type = 'time-range-updated';
+    payload: TimeRange;
+    type = 'time-range-updated';
+    constructor(payload: TimeRange) {
+      this.payload = payload;
+    }
+  },
 }));
 
 const initialTimeRange: TimeRange = {
@@ -38,18 +51,24 @@ const makeOptions = (overrides: Partial<TimelineControllerOptions> = {}): Timeli
 });
 
 const renderBasic = (overrides: Partial<TimelineControllerOptions> = {}, timeRange = initialTimeRange) => {
-  return render(
-    <BasicMode options={makeOptions(overrides)} onOptionsChange={jest.fn()} timeRange={timeRange} />
+  const eventBus = new EventBusSrv();
+  const result = render(
+    <BasicMode
+      options={makeOptions(overrides)}
+      onOptionsChange={jest.fn()}
+      timeRange={timeRange}
+      eventBus={eventBus}
+    />
   );
+  return { ...result, eventBus };
 };
 
-const rerenderWith = (
-  rerender: (ui: React.ReactElement) => void,
-  timeRange: TimeRange,
-  overrides: Partial<TimelineControllerOptions> = {}
-) => {
-  rerender(<BasicMode options={makeOptions(overrides)} onOptionsChange={jest.fn()} timeRange={timeRange} />);
-};
+// Simulate Grafana publishing a global time-picker change on the dashboard
+// event bus. Wraps act() so React processes the watcher's state updates.
+const publishTimeRangeChange = (eventBus: EventBusSrv, range: TimeRange) =>
+  act(() => {
+    eventBus.publish(new TimeRangeUpdatedEvent(range));
+  });
 
 describe('BasicMode', () => {
   beforeEach(() => {
@@ -79,7 +98,12 @@ describe('BasicMode', () => {
       raw: { from: 'now-1h', to: 'now' },
     };
     render(
-      <BasicMode options={defaultTimelineControllerOptions} onOptionsChange={jest.fn()} timeRange={atRightBoundary} />
+      <BasicMode
+        options={defaultTimelineControllerOptions}
+        onOptionsChange={jest.fn()}
+        timeRange={atRightBoundary}
+        eventBus={new EventBusSrv()}
+      />
     );
 
     expect(screen.getByLabelText('Step forward')).toBeDisabled();
@@ -196,7 +220,7 @@ describe('BasicMode', () => {
   });
 
   it('External time-picker change pauses any active playback', () => {
-    const { rerender } = renderBasic();
+    const { eventBus } = renderBasic();
 
     act(() => {
       screen.getByLabelText('Play backward').click();
@@ -206,14 +230,13 @@ describe('BasicMode', () => {
     });
 
     // Simulate the user picking a new range via the global time picker —
-    // Grafana re-renders the panel with a new timeRange prop that doesn't
-    // match what we last wrote.
+    // Grafana publishes TimeRangeUpdatedEvent on the dashboard event bus.
     const externalRange: TimeRange = {
       from: dateTime('2026-05-16T00:30:00Z'),
       to: dateTime('2026-05-16T01:00:00Z'),
       raw: { from: 'now-30m', to: 'now' },
     };
-    rerenderWith(rerender, externalRange);
+    publishTimeRangeChange(eventBus, externalRange);
     partial.mockClear();
     act(() => {
       jest.advanceTimersByTime(5000);
@@ -223,7 +246,7 @@ describe('BasicMode', () => {
   });
 
   it('Adopts an external time-picker change as the new baseline', () => {
-    const { rerender } = renderBasic();
+    const { eventBus } = renderBasic();
 
     // Step away from the initial baseline so hasStepped=true.
     act(() => {
@@ -237,7 +260,7 @@ describe('BasicMode', () => {
       to: dateTime('2026-05-16T01:00:00Z'),
       raw: { from: 'now-30m', to: 'now' },
     };
-    rerenderWith(rerender, externalRange);
+    publishTimeRangeChange(eventBus, externalRange);
 
     // External change wipes hasStepped and adopts the new baseline.
     expect(screen.getByLabelText('Reset')).toHaveAttribute('aria-disabled', 'true');
@@ -259,14 +282,14 @@ describe('BasicMode', () => {
     // The user picks a new range via the global time picker before clicking
     // anything in our panel. There's no "last write" to compare against, so
     // the matchesBaseline check carries the discrimination instead.
-    const { rerender } = renderBasic();
+    const { eventBus } = renderBasic();
 
     const externalRange: TimeRange = {
       from: dateTime('2026-05-16T00:30:00Z'),
       to: dateTime('2026-05-16T01:00:00Z'),
       raw: { from: 'now-30m', to: 'now' },
     };
-    rerenderWith(rerender, externalRange);
+    publishTimeRangeChange(eventBus, externalRange);
 
     // Step then Reset should restore the *new* baseline, not the initial one.
     act(() => {
@@ -281,7 +304,7 @@ describe('BasicMode', () => {
   });
 
   it('Three external picks in a row leave the baseline on the most recent', () => {
-    const { rerender } = renderBasic();
+    const { eventBus } = renderBasic();
 
     const pick1: TimeRange = {
       from: dateTime('2026-05-16T00:00:00Z'),
@@ -299,9 +322,9 @@ describe('BasicMode', () => {
       raw: { from: 'now-15m', to: 'now' },
     };
 
-    rerenderWith(rerender, pick1);
-    rerenderWith(rerender, pick2);
-    rerenderWith(rerender, pick3);
+    publishTimeRangeChange(eventBus, pick1);
+    publishTimeRangeChange(eventBus, pick2);
+    publishTimeRangeChange(eventBus, pick3);
 
     act(() => {
       screen.getByLabelText('Step back').click();

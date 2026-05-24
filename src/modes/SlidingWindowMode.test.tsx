@@ -1,7 +1,8 @@
 import React from 'react';
 import { act, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { dateTime, TimeRange } from '@grafana/data';
+import { dateTime, EventBusSrv, TimeRange } from '@grafana/data';
+import { TimeRangeUpdatedEvent } from '@grafana/runtime';
 import {
   defaultTimelineControllerOptions,
   SlidingWindowModeOptions,
@@ -21,6 +22,16 @@ jest.mock('@grafana/runtime', () => ({
     getHistory: () => ({ listen }),
   },
   getTemplateSrv: () => ({ getVariables: () => dashboardVariables }),
+  // Real EventBusSrv matches events by static `type`, so a mock class
+  // with the right type string is sufficient.
+  TimeRangeUpdatedEvent: class TimeRangeUpdatedEvent {
+    static type = 'time-range-updated';
+    payload: TimeRange;
+    type = 'time-range-updated';
+    constructor(payload: TimeRange) {
+      this.payload = payload;
+    }
+  },
 }));
 
 const T0 = Date.UTC(2026, 4, 16, 0, 0, 0); // 2026-05-16T00:00:00Z
@@ -42,10 +53,23 @@ const slidingOnly = (overrides: Partial<SlidingWindowModeOptions> = {}): Timelin
 const renderSliding = (
   overrides: Partial<SlidingWindowModeOptions> = {},
   timeRange: TimeRange = makeRange(T0, T0 + HOUR)
-) =>
-  render(
-    <SlidingWindowMode options={slidingOnly(overrides)} onOptionsChange={jest.fn()} timeRange={timeRange} />
+) => {
+  const eventBus = new EventBusSrv();
+  const result = render(
+    <SlidingWindowMode
+      options={slidingOnly(overrides)}
+      onOptionsChange={jest.fn()}
+      timeRange={timeRange}
+      eventBus={eventBus}
+    />
   );
+  return { ...result, eventBus };
+};
+
+const publishTimeRangeChange = (eventBus: EventBusSrv, range: TimeRange) =>
+  act(() => {
+    eventBus.publish(new TimeRangeUpdatedEvent(range));
+  });
 
 // Ignore writes that are only the usage marker (a side-effect of the
 // onOptionsChange call in the marker-sync useEffect doesn't reach
@@ -278,19 +302,24 @@ describe('SlidingWindowMode', () => {
 
   it('Resets window state when the dashboard global range changes', () => {
     const initial = makeRange(T0, T0 + HOUR);
-    const { rerender } = renderSliding({ timeStep: '5m' }, initial);
+    const { eventBus, rerender } = renderSliding({ timeStep: '5m' }, initial);
 
     act(() => {
       screen.getByLabelText('Step forward').click();
     });
     expect(screen.getByLabelText('Jump to start')).toBeEnabled();
 
+    // Real Grafana fires the event AND re-renders the panel with the new
+    // timeRange prop; in tests we have to simulate both. Display-disabled
+    // flags are derived from props.
     const next = makeRange(T0 + HOUR, T0 + 2 * HOUR);
+    publishTimeRangeChange(eventBus, next);
     rerender(
       <SlidingWindowMode
         options={slidingOnly({ timeStep: '5m' })}
         onOptionsChange={jest.fn()}
         timeRange={next}
+        eventBus={eventBus}
       />
     );
 
@@ -304,7 +333,7 @@ describe('SlidingWindowMode', () => {
 
   it('Pauses any active playback when the dashboard global range changes', () => {
     const initial = makeRange(T0, T0 + HOUR);
-    const { rerender } = renderSliding({ timeStep: '5m', tickIntervalMs: 500 }, initial);
+    const { eventBus, rerender } = renderSliding({ timeStep: '5m', tickIntervalMs: 500 }, initial);
 
     act(() => {
       screen.getByLabelText('Play forward').click();
@@ -314,11 +343,13 @@ describe('SlidingWindowMode', () => {
     });
 
     const next = makeRange(T0 + HOUR, T0 + 2 * HOUR);
+    publishTimeRangeChange(eventBus, next);
     rerender(
       <SlidingWindowMode
         options={slidingOnly({ timeStep: '5m', tickIntervalMs: 500 })}
         onOptionsChange={jest.fn()}
         timeRange={next}
+        eventBus={eventBus}
       />
     );
     const before = partial.mock.calls.length;

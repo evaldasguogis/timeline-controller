@@ -1,6 +1,6 @@
 import React, { useEffect, useReducer } from 'react';
 import { css } from '@emotion/css';
-import { GrafanaTheme2, TimeRange } from '@grafana/data';
+import { EventBus, GrafanaTheme2, TimeRange } from '@grafana/data';
 import { locationService } from '@grafana/runtime';
 import { Alert, Button, useStyles2 } from '@grafana/ui';
 import {
@@ -34,6 +34,11 @@ interface Props {
   options: TimelineControllerOptions;
   onOptionsChange: (options: TimelineControllerOptions) => void;
   timeRange: TimeRange;
+  // Dashboard-scoped event bus, threaded down from PanelProps. Passed to
+  // useWindowedReplay so it can subscribe to TimeRangeUpdatedEvent and
+  // re-seed when the user changes the global time picker. (Event mode
+  // doesn't need this — its boundary is panel-saved.)
+  eventBus: EventBus;
 }
 
 const horizontalToJustify: Record<HorizontalAlignment, string> = {
@@ -118,7 +123,7 @@ const buildUsageMarkers = (sliding: SlidingWindowModeOptions) => ({
   _variableStep: sliding.variableStep.trim() ? `\${${sliding.variableStep}}` : '',
 });
 
-export const SlidingWindowMode: React.FC<Props> = ({ options, onOptionsChange, timeRange }) => {
+export const SlidingWindowMode: React.FC<Props> = ({ options, onOptionsChange, timeRange, eventBus }) => {
   const sliding = options.sliding;
   const justifyContent = horizontalToJustify[sliding.horizontalAlignment] ?? 'center';
   const alignItems = verticalToAlignItems[sliding.verticalAlignment] ?? 'center';
@@ -174,6 +179,7 @@ export const SlidingWindowMode: React.FC<Props> = ({ options, onOptionsChange, t
     tickIntervalMs: sliding.tickIntervalMs,
     variableSpec: { from: sliding.variableFrom, to: sliding.variableTo },
     hasErrors,
+    eventBus,
   });
 
   // Not wrapped in useCallback: every dep (`intervalBinding`, `sliding`,

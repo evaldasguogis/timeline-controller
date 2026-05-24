@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { EventBus } from '@grafana/data';
+import { TimeRangeUpdatedEvent } from '@grafana/runtime';
 import { TimeStep, WindowPosition } from '../types';
 import { stepToMillis } from '../utils/timeRange';
 import { encodeTimeValue, setVariables, VariableValues } from '../utils/variables';
@@ -38,6 +40,11 @@ export interface UseWindowedReplayOptions {
   // When true, writes are suppressed — modes' validation layer gates
   // tick / step writes by setting this true.
   hasErrors: boolean;
+  // Optional dashboard-scoped event bus (from PanelProps). When provided,
+  // we subscribe to TimeRangeUpdatedEvent and re-seed on fire — used by
+  // SlidingWindowMode whose boundary IS the dashboard time range. Event
+  // mode omits it (its boundary is panel-saved).
+  eventBus?: EventBus;
 }
 
 export interface UseWindowedReplayResult {
@@ -117,6 +124,7 @@ export const useWindowedReplay = ({
   tickIntervalMs,
   variableSpec,
   hasErrors,
+  eventBus,
 }: UseWindowedReplayOptions): UseWindowedReplayResult => {
   // null means "no window yet" — distinct from a window that happens to
   // coincide with the initial seed numerically. The seed effect below
@@ -167,30 +175,45 @@ export const useWindowedReplay = ({
   });
 
   // Seed the variables with the initial window on mount and re-seed on
-  // every boundary change (dashboard time picker in sliding mode, panel
-  // option change in event mode). The same useEffect handles both — the
-  // last-seen-boundary ref distinguishes mount from external change so
-  // we only pause playback when something actually changed.
+  // every boundary change. Two converging triggers, deduped via
+  // `lastBoundaryMsRef`:
+  //   - Prop: covers mount, event mode's panel-saved boundary changes,
+  //     and any case where Grafana re-renders us with a fresh prop.
+  //   - TimeRangeUpdatedEvent (only when `eventBus` is provided — sliding
+  //     mode): robust to Grafana eventually not re-rendering skipDataQuery
+  //     panels on time changes.
   const lastBoundaryMsRef = useRef<{ from: number; to: number } | null>(null);
+  const seedFromBoundary = useCallback(
+    (fromMs: number, toMs: number) => {
+      const last = lastBoundaryMsRef.current;
+      if (last !== null && last.from === fromMs && last.to === toMs) {
+        return;
+      }
+      const isExternalChange = last !== null;
+      lastBoundaryMsRef.current = { from: fromMs, to: toMs };
+      if (isExternalChange) {
+        pause();
+      }
+      const initial = initialWindowFor(fromMs, toMs, stepRef.current, initialPositionRef.current);
+      setCurrentWindow(initial);
+      writeWindow(initial);
+    },
+    [pause, writeWindow]
+  );
+
   useEffect(() => {
-    const last = lastBoundaryMsRef.current;
-    if (last !== null && last.from === boundaryFromMs && last.to === boundaryToMs) {
+    seedFromBoundary(boundaryFromMs, boundaryToMs);
+  }, [boundaryFromMs, boundaryToMs, seedFromBoundary]);
+
+  useEffect(() => {
+    if (!eventBus) {
       return;
     }
-    const isExternalChange = last !== null;
-    lastBoundaryMsRef.current = { from: boundaryFromMs, to: boundaryToMs };
-    if (isExternalChange) {
-      pause();
-    }
-    const initial = initialWindowFor(
-      boundaryFromMs,
-      boundaryToMs,
-      stepRef.current,
-      initialPositionRef.current
-    );
-    setCurrentWindow(initial);
-    writeWindow(initial);
-  }, [boundaryFromMs, boundaryToMs, pause, writeWindow]);
+    const sub = eventBus.getStream(TimeRangeUpdatedEvent).subscribe(({ payload }) => {
+      seedFromBoundary(payload.from.valueOf(), payload.to.valueOf());
+    });
+    return () => sub.unsubscribe();
+  }, [eventBus, seedFromBoundary]);
 
   // When the step changes mid-session, the visible window has the old
   // span. Anchor at the existing `from` and recompute `to`; if the new

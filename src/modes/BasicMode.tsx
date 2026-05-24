@@ -1,6 +1,6 @@
 import React, { useEffect, useReducer } from 'react';
 import { css } from '@emotion/css';
-import { GrafanaTheme2, TimeRange } from '@grafana/data';
+import { EventBus, GrafanaTheme2, TimeRange } from '@grafana/data';
 import { locationService } from '@grafana/runtime';
 import { Button, useStyles2 } from '@grafana/ui';
 import { HorizontalAlignment, TimeStep, TimelineControllerOptions, VerticalAlignment } from '../types';
@@ -25,6 +25,10 @@ interface Props {
   options: TimelineControllerOptions;
   onOptionsChange: (options: TimelineControllerOptions) => void;
   timeRange: TimeRange;
+  // Dashboard-scoped event bus, threaded down from PanelProps. The
+  // playback hook subscribes to TimeRangeUpdatedEvent on it to detect
+  // external time-picker / refresh changes.
+  eventBus: EventBus;
 }
 
 const horizontalToJustify: Record<HorizontalAlignment, string> = {
@@ -72,7 +76,7 @@ const getStyles = (theme: GrafanaTheme2, justifyContent: string, alignItems: str
   `,
 });
 
-export const BasicMode: React.FC<Props> = ({ options, onOptionsChange, timeRange }) => {
+export const BasicMode: React.FC<Props> = ({ options, onOptionsChange, timeRange, eventBus }) => {
   const justifyContent = horizontalToJustify[options.basic.horizontalAlignment] ?? 'center';
   const alignItems = verticalToAlignItems[options.basic.verticalAlignment] ?? 'center';
   const styles = useStyles2((theme) => getStyles(theme, justifyContent, alignItems));
@@ -115,6 +119,7 @@ export const BasicMode: React.FC<Props> = ({ options, onOptionsChange, timeRange
 
   const playback = useGlobalRangeReplay({
     timeRange,
+    eventBus,
     step: activeStep,
     tickIntervalMs: options.basic.tickIntervalMs,
   });

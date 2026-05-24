@@ -1,24 +1,36 @@
-import { useCallback, useRef, useState } from 'react';
-import { dateTime, RawTimeRange, TimeRange } from '@grafana/data';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { dateTime, EventBus, RawTimeRange, TimeRange } from '@grafana/data';
+import { TimeRangeUpdatedEvent } from '@grafana/runtime';
 import { TimeStep } from '../types';
 import { clampToBoundary, makeTimeRange, shiftRange, stepToMillis } from '../utils/timeRange';
 import { getGlobalRange, setGlobalRange } from '../utils/globalRange';
 import { toAbsoluteMs } from '../utils/timeBound';
 import { PlaybackState, TickResult, useReplay } from './useReplay';
 import { PanelKeyboardProps, usePanelKeyboard } from './usePanelKeyboard';
-import { useExternalTimeRangeWatcher } from './useExternalTimeRangeWatcher';
 import { useLiveRef } from './useLiveRef';
 
 // Playback engine for BasicMode — drives the dashboard's global time range
 // directly (no template variables). Sibling to `useWindowedReplay` which
 // handles the variable-driven window modes. Both compose `useReplay` for
 // the transport state machine and `usePanelKeyboard` for keyboard
-// plumbing; this hook adds the global-range write model, baseline tracking,
-// and Reset semantics specific to BasicMode.
+// plumbing; this hook adds the global-range write model, baseline
+// tracking, and Reset semantics specific to BasicMode.
+
+// Relative writes ('now-6h') resolve against the wall clock at write time
+// and again at parse time — those two moments can be a few hundred
+// milliseconds apart, which would otherwise look like an "external change".
+// 1.5s is well above realistic render lag and well below any user-driven
+// change.
+const EXTERNAL_CHANGE_TOLERANCE_MS = 1500;
 
 export interface UseGlobalRangeReplayOptions {
-  // The dashboard's current time range, as the panel prop.
+  // The dashboard's current time range, as the panel prop. Used for the
+  // initial baseline; subsequent changes arrive via `eventBus`.
   timeRange: TimeRange;
+  // Dashboard-scoped event bus from PanelProps — Grafana publishes
+  // TimeRangeUpdatedEvent here when the user changes the picker or an
+  // auto-refresh re-resolves a relative range.
+  eventBus: EventBus;
   // Current step size — drives how far each tick moves the range.
   step: TimeStep;
   // Delay between ticks while playing.
@@ -26,7 +38,8 @@ export interface UseGlobalRangeReplayOptions {
 }
 
 export interface UseGlobalRangeReplayResult {
-  // The time range to restore on Reset. Tracked via the external-watcher.
+  // The time range to restore on Reset. Updated when the user picks an
+  // external range; preserved across our own Step / Play / Reset writes.
   baselineRaw: RawTimeRange;
   // Playback state machine.
   state: PlaybackState;
@@ -76,6 +89,7 @@ const computeShiftedRange = (
 
 export const useGlobalRangeReplay = ({
   timeRange,
+  eventBus,
   step: timeStep,
   tickIntervalMs,
 }: UseGlobalRangeReplayOptions): UseGlobalRangeReplayResult => {
@@ -83,15 +97,20 @@ export const useGlobalRangeReplay = ({
   // baseline" flag, used directly for Reset's enabled state. We could
   // derive it from a current-vs-baseline range comparison, but that
   // comparison would be fuzzy (tolerance-based) and would couple Reset's
-  // UI state to the same discrimination logic the watcher already does.
+  // UI state to the same discrimination logic the classifier below does.
   const [hasStepped, setHasStepped] = useState(false);
+
+  // Initial baseline = current timeRange at mount. The event-bus
+  // subscription handles every change after that.
+  const [baselineRaw, setBaselineRaw] = useState<RawTimeRange>(timeRange.raw);
+  const baselineRawRef = useLiveRef(baselineRaw);
 
   // Live ref so the onTick closure always reads the latest step without
   // forcing useReplay to re-create its interval.
   const stepRef = useLiveRef(timeStep);
 
-  // Most recent write's absolute ms — handed to the external-change watcher
-  // so it can recognize prop updates that are echoes of our own writes.
+  // Most recent write's absolute ms — the classifier reads it to
+  // recognize event firings that are echoes of our own writes.
   const lastWrittenAbsRef = useRef<{ from: number; to: number } | null>(null);
 
   const writeRange = useCallback((raw: RawTimeRange) => {
@@ -117,16 +136,36 @@ export const useGlobalRangeReplay = ({
     onTick: handleTick,
   });
 
-  const handleExternalChange = useCallback(() => {
-    pause();
-    setHasStepped(false);
-  }, [pause]);
+  // Subscribe to TimeRangeUpdatedEvent and classify each delivery:
+  //   1. Matches the last range we wrote → our echo, skip.
+  //   2. Matches the current baseline → reset echo, skip.
+  //   3. Otherwise → external. Adopt as new baseline + pause + clear
+  //      hasStepped so Reset disables itself.
+  // Both (1) and (2) are needed: (1) alone misses "user picks a range
+  // matching where we last stepped"; (2) alone misses our own Step writes
+  // (which would otherwise become the new baseline).
+  useEffect(() => {
+    const within = (a: number, b: number) => Math.abs(a - b) <= EXTERNAL_CHANGE_TOLERANCE_MS;
+    const sub = eventBus.getStream(TimeRangeUpdatedEvent).subscribe((event) => {
+      const fromMs = event.payload.from.valueOf();
+      const toMs = event.payload.to.valueOf();
 
-  const baselineRaw = useExternalTimeRangeWatcher({
-    timeRange,
-    lastWrittenAbsRef,
-    onExternalChange: handleExternalChange,
-  });
+      const last = lastWrittenAbsRef.current;
+      if (last && within(last.from, fromMs) && within(last.to, toMs)) {
+        return; // echo of our own write
+      }
+
+      const base = baselineRawRef.current;
+      if (within(toAbsoluteMs(base.from, false), fromMs) && within(toAbsoluteMs(base.to, true), toMs)) {
+        return; // mount / reset echo — already on baseline
+      }
+
+      pause();
+      setBaselineRaw(event.payload.raw);
+      setHasStepped(false);
+    });
+    return () => sub.unsubscribe();
+  }, [eventBus, pause]);
 
   const reset = useCallback(() => {
     pause();
