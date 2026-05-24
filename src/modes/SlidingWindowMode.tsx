@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2, TimeRange } from '@grafana/data';
-import { getAppEvents, locationService, RefreshEvent, TimeRangeUpdatedEvent } from '@grafana/runtime';
+import { locationService } from '@grafana/runtime';
 import { Alert, Button, useStyles2 } from '@grafana/ui';
 import {
   HorizontalAlignment,
@@ -304,13 +304,13 @@ export const SlidingWindowMode: React.FC<Props> = ({ options, onOptionsChange, t
   // When the user picks a new range via the global time picker, our existing
   // Seed the variables with the initial window so downstream panels never
   // see empty bounds, and re-seed on every external time range change.
-  // Two channels feed this: the timeRange prop (handles initial mount and
-  // any re-renders Grafana does itself) and Grafana's TimeRangeUpdatedEvent
-  // (covers manual time-picker changes that may not re-render this panel
-  // because of skipDataQuery). RefreshEvent covers auto-refresh ticks for
-  // relative ranges (`now-3h`) where the absolute bounds shift each tick.
-  // Both event paths read the fresh range from `getTemplateSrv()`-adjacent
-  // sources rather than the (potentially stale) prop.
+  // Driven by the timeRange prop: Grafana re-renders us with a fresh prop
+  // on time-picker changes and on auto-refresh ticks of relative ranges,
+  // even though skipDataQuery suppresses query runs. We previously tried
+  // also subscribing to TimeRangeUpdatedEvent / RefreshEvent on the app
+  // event bus as a defensive fallback, but neither fires under Grafana 12
+  // (Scenes) — verified via console.log instrumentation. Same finding is
+  // documented in useExternalTimeRangeWatcher.
   const lastBoundaryMsRef = useRef<{ from: number; to: number } | null>(null);
   const seedWindow = useCallback(
     (tr: TimeRange) => {
@@ -336,20 +336,6 @@ export const SlidingWindowMode: React.FC<Props> = ({ options, onOptionsChange, t
   useEffect(() => {
     seedWindow(timeRange);
   }, [timeRange, seedWindow]);
-
-  // Event-driven re-seed for picker changes and auto-refresh of relative
-  // ranges (skipDataQuery may otherwise leave the prop stale).
-  useEffect(() => {
-    const appEvents = getAppEvents();
-    const onTimeRangeUpdated = (event: TimeRangeUpdatedEvent) => seedWindow(event.payload);
-    const onRefresh = () => seedWindow(timeRangeRef.current);
-    const sub1 = appEvents.subscribe(TimeRangeUpdatedEvent, onTimeRangeUpdated);
-    const sub2 = appEvents.subscribe(RefreshEvent, onRefresh);
-    return () => {
-      sub1.unsubscribe();
-      sub2.unsubscribe();
-    };
-  }, [seedWindow]);
 
   // When the step changes mid-session, the visible window has the old span.
   // Anchor at the existing `from` and recompute `to`; if the new span would

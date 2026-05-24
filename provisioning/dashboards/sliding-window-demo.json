@@ -36,6 +36,8 @@
         "mode": "sliding",
         "sliding": {
           "horizontalAlignment": "center",
+          "initialPosition": "start",
+          "showProgressTrack": true,
           "tickIntervalMs": 1000,
           "timeStep": "5m",
           "variableFrom": "timeFrom",

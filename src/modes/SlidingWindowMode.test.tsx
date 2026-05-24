@@ -21,18 +21,6 @@ jest.mock('@grafana/runtime', () => ({
     getHistory: () => ({ listen }),
   },
   getTemplateSrv: () => ({ getVariables: () => dashboardVariables }),
-  // Minimal stub — the event bus is consumed via `subscribe(EventClass, fn)`
-  // which returns an unsubscribe handle. Tests don't dispatch events; they
-  // only need the subscription to no-op.
-  getAppEvents: () => ({
-    subscribe: () => ({ unsubscribe: () => undefined }),
-  }),
-  RefreshEvent: class RefreshEvent {
-    static type = 'refresh';
-  },
-  TimeRangeUpdatedEvent: class TimeRangeUpdatedEvent {
-    static type = 'time-range-updated';
-  },
 }));
 
 const T0 = Date.UTC(2026, 4, 16, 0, 0, 0); // 2026-05-16T00:00:00Z
