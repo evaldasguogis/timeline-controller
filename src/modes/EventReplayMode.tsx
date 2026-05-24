@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import React, { useEffect, useReducer } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import { locationService } from '@grafana/runtime';
@@ -9,17 +9,14 @@ import {
   TimeStep,
   TimelineControllerOptions,
   VerticalAlignment,
-  WindowPosition,
 } from '../types';
-import { stepToMillis } from '../utils/timeRange';
-import { encodeTimeValue, setVariables, VariableValues } from '../utils/variables';
+import { setVariables } from '../utils/variables';
 import { validateVariableConfig } from '../utils/variableValidation';
 import { readIntervalVariable } from '../utils/intervalVariable';
 import { TimeStepDropdown } from '../components/TimeStepDropdown';
 import { PlaybackControls } from '../components/PlaybackControls';
 import { WindowProgressTrack } from '../components/WindowProgressTrack';
-import { useReplay, TickResult } from '../hooks/useReplay';
-import { usePlaybackShortcuts } from '../hooks/usePlaybackShortcuts';
+import { useWindowedReplay } from '../hooks/useWindowedReplay';
 
 // Event Replay is mechanically identical to Sliding Window — same writes,
 // same window math — except the boundary is panel-configured rather than
@@ -27,20 +24,13 @@ import { usePlaybackShortcuts } from '../hooks/usePlaybackShortcuts';
 // time range being replayed is a specific historical event that should
 // stay fixed regardless of what the dashboard's time picker shows.
 //
-// Implementation note: most of this file is copy-pasted from
-// SlidingWindowMode with the boundary source swapped. Comparison mode
-// (planned) will need this same window-replay engine doubled, so the
-// shared logic will get extracted to a hook then. For now the duplication
-// is honest about what's actually shared vs. what's mode-specific.
+// The window-playback engine lives in `useWindowedReplay`. This file owns
+// the mode-specific shell: boundary validation, usage-marker sync, the
+// variable-picker / step-dropdown UI, and rendering.
 
 interface Props {
   options: TimelineControllerOptions;
   onOptionsChange: (options: TimelineControllerOptions) => void;
-}
-
-interface WindowMs {
-  from: number;
-  to: number;
 }
 
 const horizontalToJustify: Record<HorizontalAlignment, string> = {
@@ -105,47 +95,6 @@ const getStyles = (theme: GrafanaTheme2, justifyContent: string, alignItems: str
   `,
 });
 
-// Initial window: anchored to either edge of the configured boundary per
-// `position`, one timeStep wide, clamped to fit.
-const initialWindow = (
-  boundaryFromMs: number,
-  boundaryToMs: number,
-  timeStep: TimeStep,
-  position: WindowPosition
-): WindowMs => {
-  const stepMs = stepToMillis(timeStep);
-  if (position === 'end') {
-    return { from: Math.max(boundaryFromMs, boundaryToMs - stepMs), to: boundaryToMs };
-  }
-  return { from: boundaryFromMs, to: Math.min(boundaryFromMs + stepMs, boundaryToMs) };
-};
-
-// Shift the window by `stepMs` and clamp to the configured boundary. When
-// clamping engages, the window's width is preserved and `boundaryHit` is
-// reported so the caller can auto-pause playback.
-const shiftWindow = (
-  current: WindowMs,
-  stepMs: number,
-  boundaryFrom: number,
-  boundaryTo: number,
-  forward: boolean
-): { next: WindowMs; boundaryHit: boolean } => {
-  const span = current.to - current.from;
-  let from = forward ? current.from + stepMs : current.from - stepMs;
-  let to = forward ? current.to + stepMs : current.to - stepMs;
-  let boundaryHit = false;
-  if (forward && to >= boundaryTo) {
-    boundaryHit = true;
-    to = boundaryTo;
-    from = boundaryTo - span;
-  } else if (!forward && from <= boundaryFrom) {
-    boundaryHit = true;
-    from = boundaryFrom;
-    to = boundaryFrom + span;
-  }
-  return { next: { from, to }, boundaryHit };
-};
-
 const buildUsageMarkers = (event: EventReplayModeOptions) => ({
   _variableFrom: event.variableFrom.trim() ? `\${${event.variableFrom}}` : '',
   _variableTo: event.variableTo.trim() ? `\${${event.variableTo}}` : '',
@@ -172,16 +121,13 @@ export const EventReplayMode: React.FC<Props> = ({ options, onOptionsChange }) =
   const alignItems = verticalToAlignItems[event.verticalAlignment] ?? 'center';
   const styles = useStyles2((theme) => getStyles(theme, justifyContent, alignItems));
 
-  const [currentWindow, setCurrentWindow] = useState<WindowMs | null>(null);
-
   // Same URL-history subscription pattern as the other modes: skipDataQuery
   // means Grafana won't re-render us on variable changes, so we listen for
   // URL updates directly to keep the step dropdown in sync.
   const [, bumpRender] = useReducer((x: number) => x + 1, 0);
   useEffect(() => locationService.getHistory().listen(bumpRender), []);
 
-  // Keep the synthetic per-slot usage markers in sync so Grafana's "Used
-  // by panels" scan always sees the current set of `${name}` references.
+  // Keep the synthetic per-slot usage markers in sync.
   useEffect(() => {
     const expected = buildUsageMarkers(options.event);
     if (
@@ -205,181 +151,16 @@ export const EventReplayMode: React.FC<Props> = ({ options, onOptionsChange }) =
   const warnings = variableValidation.warnings;
   const hasErrors = errors.length > 0;
 
-  // Refs for the tick callback (same pattern as SlidingWindowMode).
-  const timeStepRef = useRef<TimeStep>(activeStep);
-  const boundaryRef = useRef<{ from: number; to: number }>({
-    from: event.boundaryFrom,
-    to: event.boundaryTo,
-  });
-  const currentWindowRef = useRef<WindowMs | null>(currentWindow);
-  const variableSpecRef = useRef<{ from: string; to: string }>({
-    from: event.variableFrom,
-    to: event.variableTo,
-  });
-  const initialPositionRef = useRef<WindowPosition>(event.initialPosition);
-
-  useEffect(() => {
-    timeStepRef.current = activeStep;
-  }, [activeStep]);
-  useEffect(() => {
-    boundaryRef.current = { from: event.boundaryFrom, to: event.boundaryTo };
-  }, [event.boundaryFrom, event.boundaryTo]);
-  useEffect(() => {
-    currentWindowRef.current = currentWindow;
-  }, [currentWindow]);
-  useEffect(() => {
-    variableSpecRef.current = {
-      from: event.variableFrom,
-      to: event.variableTo,
-    };
-  }, [event.variableFrom, event.variableTo]);
-  useEffect(() => {
-    initialPositionRef.current = event.initialPosition;
-  }, [event.initialPosition]);
-
-  const hasErrorsRef = useRef(hasErrors);
-  useEffect(() => {
-    hasErrorsRef.current = hasErrors;
-  }, [hasErrors]);
-
-  const writeWindow = useCallback((win: WindowMs) => {
-    if (hasErrorsRef.current) {
-      return;
-    }
-    const spec = variableSpecRef.current;
-    const values: VariableValues = {
-      [spec.from]: encodeTimeValue(win.from),
-      [spec.to]: encodeTimeValue(win.to),
-    };
-    setVariables(values);
-  }, []);
-
-  const handleTick = useCallback(
-    (forward: boolean): TickResult => {
-      const ts = timeStepRef.current;
-      const { from: boundaryFrom, to: boundaryTo } = boundaryRef.current;
-      const stepMs = stepToMillis(ts);
-
-      const start =
-        currentWindowRef.current ?? initialWindow(boundaryFrom, boundaryTo, ts, initialPositionRef.current);
-      const { next, boundaryHit } = shiftWindow(start, stepMs, boundaryFrom, boundaryTo, forward);
-
-      setCurrentWindow(next);
-      writeWindow(next);
-      return { boundaryHit };
-    },
-    [writeWindow]
-  );
-
-  const { state, startPlayback, pause, step } = useReplay({
+  const playback = useWindowedReplay({
+    boundaryFromMs: event.boundaryFrom,
+    boundaryToMs: event.boundaryTo,
+    step: activeStep,
+    initialPosition: event.initialPosition,
     tickIntervalMs: event.tickIntervalMs,
-    onTick: handleTick,
+    variableSpec: { from: event.variableFrom, to: event.variableTo },
+    hasErrors,
   });
 
-  // If the user changes the boundary in panel options while playing, the
-  // Seed the variables with the initial window so downstream panels never
-  // see empty bounds, and re-seed on every boundary change. The boundary is
-  // panel-configured (no dashboard-time coupling), so the prop changes
-  // suffice — no event-bus subscription needed unlike SlidingWindowMode.
-  const lastBoundaryRef = useRef<{ from: number; to: number } | null>(null);
-  useEffect(() => {
-    const last = lastBoundaryRef.current;
-    if (
-      last !== null &&
-      last.from === event.boundaryFrom &&
-      last.to === event.boundaryTo
-    ) {
-      return;
-    }
-    const isExternalChange = last !== null;
-    lastBoundaryRef.current = { from: event.boundaryFrom, to: event.boundaryTo };
-    if (isExternalChange) {
-      pause();
-    }
-    const initial = initialWindow(
-      event.boundaryFrom,
-      event.boundaryTo,
-      timeStepRef.current,
-      initialPositionRef.current
-    );
-    setCurrentWindow(initial);
-    writeWindow(initial);
-  }, [event.boundaryFrom, event.boundaryTo, pause, writeWindow]);
-
-  // When the step changes mid-session, the visible window has the old span.
-  // Anchor at the existing `from` and recompute `to`; if the new span would
-  // overshoot the boundary, shift `from` left so the window still fits.
-  // Also republish — the downstream panels need the resized window.
-  useEffect(() => {
-    const cw = currentWindowRef.current;
-    if (cw === null) {
-      return;
-    }
-    const { from: boundaryFromMs, to: boundaryToMs } = boundaryRef.current;
-    const stepMs = stepToMillis(activeStep);
-    let from = cw.from;
-    let to = from + stepMs;
-    if (to > boundaryToMs) {
-      to = boundaryToMs;
-      from = Math.max(boundaryFromMs, to - stepMs);
-    }
-    if (from === cw.from && to === cw.to) {
-      return;
-    }
-    const next: WindowMs = { from, to };
-    setCurrentWindow(next);
-    writeWindow(next);
-  }, [activeStep, writeWindow]);
-
-  const handleJumpToStart = useCallback(() => {
-    pause();
-    // Jump-to-start is always the leftmost position, independent of the
-    // configured `initialPosition`.
-    const { from, to } = boundaryRef.current;
-    const start = initialWindow(from, to, timeStepRef.current, 'start');
-    writeWindow(start);
-    setCurrentWindow(start);
-  }, [pause, writeWindow]);
-
-  const handleJumpToEnd = useCallback(() => {
-    pause();
-    const { from: boundaryFromMs, to: boundaryToMs } = boundaryRef.current;
-    const stepMs = stepToMillis(timeStepRef.current);
-    const end = {
-      from: Math.max(boundaryFromMs, boundaryToMs - stepMs),
-      to: boundaryToMs,
-    };
-    writeWindow(end);
-    setCurrentWindow(end);
-  }, [pause, writeWindow]);
-
-  const handleTogglePlay = useCallback(() => {
-    if (state === 'paused') {
-      startPlayback(true);
-    } else {
-      pause();
-    }
-  }, [state, startPlayback, pause]);
-
-  const handleTogglePlayBackward = useCallback(() => {
-    if (state === 'paused') {
-      startPlayback(false);
-    } else {
-      pause();
-    }
-  }, [state, startPlayback, pause]);
-
-  const panelKeyboard = usePlaybackShortcuts({
-    togglePlay: handleTogglePlay,
-    togglePlayBackward: handleTogglePlayBackward,
-    pause,
-    stepBack: () => step(false),
-    stepForward: () => step(true),
-    jumpToStart: handleJumpToStart,
-    jumpToEnd: handleJumpToEnd,
-  });
-
-  // Not wrapped in useCallback — see the same note in SlidingWindowMode.
   const handleTimeStepChange = (newTimeStep: TimeStep) => {
     if (intervalBinding) {
       setVariables({ [event.variableStep]: newTimeStep });
@@ -410,19 +191,8 @@ export const EventReplayMode: React.FC<Props> = ({ options, onOptionsChange }) =
     );
   }
 
-  // Boundary is known-good past validation; pre-compute values for render.
-  const stepMs = stepToMillis(activeStep);
-  const boundarySpan = event.boundaryTo - event.boundaryFrom;
-  const displayWindow =
-    currentWindow ?? initialWindow(event.boundaryFrom, event.boundaryTo, activeStep, event.initialPosition);
-  const forwardDisabled = displayWindow.to >= event.boundaryTo;
-  const backwardDisabled = displayWindow.from <= event.boundaryFrom;
-  const jumpToStartDisabled = backwardDisabled;
-  const jumpToEndDisabled = forwardDisabled;
-  const stepLargerThanBoundary = stepMs > boundarySpan;
-
   return (
-    <div className={styles.wrapper} {...panelKeyboard}>
+    <div className={styles.wrapper} {...playback.panelKeyboard}>
       {warnings.length > 0 && (
         <Alert severity="warning" title="Variable configuration">
           {warnings.map((msg) => (
@@ -437,32 +207,29 @@ export const EventReplayMode: React.FC<Props> = ({ options, onOptionsChange }) =
         <div className={styles.trackRow}>
           <WindowProgressTrack
             boundary={{ from: event.boundaryFrom, to: event.boundaryTo }}
-            current={displayWindow}
+            current={playback.displayWindow}
             tickIntervalMs={event.tickIntervalMs}
-            onCommit={(next) => {
-              setCurrentWindow(next);
-              writeWindow(next);
-            }}
-            onDragStart={pause}
-            onNudge={step}
+            onCommit={playback.commitWindow}
+            onDragStart={playback.pause}
+            onNudge={playback.step}
           />
         </div>
       )}
       <div className={styles.controlsRow}>
         <PlaybackControls
-          state={state}
+          state={playback.state}
           stepLabel={activeStep}
-          backwardDisabled={backwardDisabled || stepLargerThanBoundary}
-          forwardDisabled={forwardDisabled || stepLargerThanBoundary}
-          onPlayBack={() => startPlayback(false)}
-          onPause={pause}
-          onPlayForward={() => startPlayback(true)}
-          onStepBack={() => step(false)}
-          onStepForward={() => step(true)}
-          onJumpToStart={handleJumpToStart}
-          onJumpToEnd={handleJumpToEnd}
-          jumpToStartDisabled={jumpToStartDisabled}
-          jumpToEndDisabled={jumpToEndDisabled}
+          backwardDisabled={playback.backwardDisabled || playback.stepLargerThanBoundary}
+          forwardDisabled={playback.forwardDisabled || playback.stepLargerThanBoundary}
+          onPlayBack={() => playback.startPlayback(false)}
+          onPause={playback.pause}
+          onPlayForward={() => playback.startPlayback(true)}
+          onStepBack={() => playback.step(false)}
+          onStepForward={() => playback.step(true)}
+          onJumpToStart={playback.jumpToStart}
+          onJumpToEnd={playback.jumpToEnd}
+          jumpToStartDisabled={playback.jumpToStartDisabled}
+          jumpToEndDisabled={playback.jumpToEndDisabled}
         />
         <span className={styles.separator} aria-hidden="true" />
         <div className={styles.stepGroup}>
@@ -470,7 +237,7 @@ export const EventReplayMode: React.FC<Props> = ({ options, onOptionsChange }) =
           <TimeStepDropdown
             value={activeStep}
             onChange={handleTimeStepChange}
-            maxMs={boundarySpan}
+            maxMs={event.boundaryTo - event.boundaryFrom}
             intervalBinding={intervalBinding ?? undefined}
           />
         </div>
