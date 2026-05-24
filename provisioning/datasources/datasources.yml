@@ -11,3 +11,14 @@ datasources:
     jsonData:
       httpMethod: POST
       timeInterval: 15s
+
+  # Provisioned so demo dashboards can reference it by a stable UID without
+  # relying on Grafana's auto-installed instance whose UID varies. Used to
+  # draw template-variable-driven overlays (e.g. the sliding-window band)
+  # without coupling them to a specific business datasource.
+  - name: TestData
+    type: grafana-testdata-datasource
+    uid: testdata
+    access: proxy
+    isDefault: false
+    editable: true

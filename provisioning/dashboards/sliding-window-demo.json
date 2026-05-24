@@ -3,10 +3,7 @@
     "list": [
       {
         "builtIn": 1,
-        "datasource": {
-          "type": "grafana",
-          "uid": "-- Grafana --"
-        },
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
         "enable": true,
         "hide": true,
         "iconColor": "rgba(0, 211, 255, 1)",
@@ -21,20 +18,11 @@
   "links": [],
   "panels": [
     {
-      "gridPos": {
-        "h": 3,
-        "w": 24,
-        "x": 0,
-        "y": 0
-      },
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
       "id": 10,
       "options": {
-        "code": {
-          "language": "plaintext",
-          "showLineNumbers": false,
-          "showMiniMap": false
-        },
-        "content": "## Sliding Window mode — Timeline Controller\n\nThis dashboard demonstrates the **variable-driven** pipeline. The Timeline Controller panel below writes `timeFrom` / `timeTo` / `step` template variables on every tick. The Stat panels query Prometheus **at the sliding playhead** with PromQL's `@` modifier, and the rate panel uses `$step` in its `[range]` bracket — so both update each time the window moves.\n\nPress **Play forward** to start. The big chart shows the full global range as a reference; the stats track the playhead.",
+        "code": { "language": "plaintext", "showLineNumbers": false, "showMiniMap": false },
+        "content": "## Sliding Window mode — Timeline Controller\n\nThe Timeline Controller below writes `timeFrom` / `timeTo` / `step` template variables on every tick (Unix milliseconds for the bounds). The text panel re-renders each tick with the current bounds rendered as ISO datetimes; the CPU stat re-aggregates over the chosen step. The CPU chart at the bottom uses a Mixed datasource — Prometheus for the metric, and Grafana's built-in TestData for a small CSV that draws the **window overlay** as a translucent band. Press Play and watch the band slide across the chart.\n\nKeyboard: **K** play/pause, **J** play backward, **`,`** / **`.`** step, **Home** / **End** jump to edges. Click anywhere on the Timeline Controller panel first so the keys are armed.",
         "mode": "markdown"
       },
       "pluginVersion": "12.4.0",
@@ -42,16 +30,7 @@
       "type": "text"
     },
     {
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 24,
-        "x": 0,
-        "y": 3
-      },
+      "gridPos": { "h": 4, "w": 16, "x": 0, "y": 3 },
       "id": 1,
       "options": {
         "mode": "sliding",
@@ -59,7 +38,6 @@
           "horizontalAlignment": "center",
           "tickIntervalMs": 1000,
           "timeStep": "5m",
-          "timeFormat": "s",
           "variableFrom": "timeFrom",
           "variableTo": "timeTo",
           "variableStep": "step",
@@ -71,15 +49,23 @@
       "type": "evaldasguogis-timelinecontroller-panel"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom-demo"
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 3 },
+      "id": 11,
+      "options": {
+        "code": { "language": "plaintext", "showLineNumbers": false, "showMiniMap": false },
+        "content": "### Current window\n\n**From:** `${timeFrom:date:iso}`  \n**To:**  `${timeTo:date:iso}`  \n**Step:** `${step}`\n\n_Updated each tick by the Timeline Controller. Variable values are Unix milliseconds; the `:date:iso` formatter renders them as ISO datetimes._",
+        "mode": "markdown"
       },
+      "pluginVersion": "12.4.0",
+      "title": "",
+      "type": "text"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prom-demo" },
+      "description": "Average CPU utilization evaluated **at the playhead** — `rate(node_cpu_seconds_total{mode=\"idle\"}[$step] @ ${timeTo:date:seconds})`. The `:date:seconds` formatter converts the ms variable to a Unix-seconds literal that PromQL's `@` modifier accepts. The number changes each tick as the window slides.",
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
+          "color": { "mode": "thresholds" },
           "mappings": [],
           "max": 100,
           "min": 0,
@@ -95,175 +81,38 @@
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 0,
-        "y": 6
-      },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 7 },
       "id": 2,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "showPercentChange": false,
         "textMode": "auto"
       },
       "pluginVersion": "12.4.0",
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prom-demo"
-          },
-          "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[$step]) @ ${timeTo}) * 100)",
+          "datasource": { "type": "prometheus", "uid": "prom-demo" },
+          "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[$step] @ ${timeTo:date:seconds})) * 100)",
           "instant": true,
-          "legendFormat": "CPU at playhead",
+          "legendFormat": "CPU",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "CPU at playhead (%)",
+      "title": "CPU at playhead",
       "type": "stat"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom-demo"
-      },
+      "datasource": { "type": "prometheus", "uid": "prom-demo" },
+      "datasource": { "type": "datasource", "uid": "-- Mixed --" },
+      "description": "CPU rate across the full dashboard range with a translucent band marking the current window. The band query is a TestData CSV with two rows at `${timeFrom}` and `${timeTo}` — datasource-neutral because TestData ships with every Grafana install. The metric query stays Prometheus-only and would change per dataset.",
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "max": 100,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": 0 },
-              { "color": "orange", "value": 60 },
-              { "color": "red", "value": 80 }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 8,
-        "y": 6
-      },
-      "id": 3,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto"
-      },
-      "pluginVersion": "12.4.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prom-demo"
-          },
-          "expr": "(1 - node_memory_MemAvailable_bytes @ ${timeTo} / node_memory_MemTotal_bytes @ ${timeTo}) * 100",
-          "instant": true,
-          "legendFormat": "Memory at playhead",
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "Memory at playhead (%)",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom-demo"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": 0 },
-              { "color": "orange", "value": 1 },
-              { "color": "red", "value": 4 }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 16,
-        "y": 6
-      },
-      "id": 4,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto"
-      },
-      "pluginVersion": "12.4.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prom-demo"
-          },
-          "expr": "avg(node_load1 @ ${timeTo})",
-          "instant": true,
-          "legendFormat": "Load1 at playhead",
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "Load (1m avg) at playhead",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom-demo"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
+          "color": { "mode": "palette-classic" },
           "custom": {
             "axisBorderShow": false,
             "axisCenteredZero": false,
@@ -275,28 +124,17 @@
             "drawStyle": "line",
             "fillOpacity": 15,
             "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
             "insertNulls": false,
             "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
+            "scaleDistribution": { "type": "linear" },
             "showPoints": "never",
             "showValues": false,
             "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
           },
           "mappings": [],
           "max": 100,
@@ -310,62 +148,55 @@
           },
           "unit": "percent"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": { "id": "byFrameRefID", "options": "B" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } },
+              { "id": "custom.fillOpacity", "value": 25 },
+              { "id": "custom.lineWidth", "value": 0 },
+              { "id": "custom.fillBelowTo", "value": "" },
+              { "id": "custom.hideFrom", "value": { "legend": true, "tooltip": true, "viz": false } },
+              { "id": "displayName", "value": "Window" }
+            ]
+          }
+        ]
       },
-      "gridPos": {
-        "h": 9,
-        "w": 24,
-        "x": 0,
-        "y": 12
-      },
+      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 11 },
       "id": 5,
       "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": false
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        }
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "tooltip": { "hideZeros": false, "mode": "single", "sort": "none" }
       },
       "pluginVersion": "12.4.0",
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prom-demo"
-          },
-          "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
-          "legendFormat": "CPU (full range, for reference)",
+          "datasource": { "type": "prometheus", "uid": "prom-demo" },
+          "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[$step])) * 100)",
+          "legendFormat": "CPU",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": { "type": "grafana-testdata-datasource", "uid": "testdata" },
+          "scenarioId": "csv_content",
+          "csvContent": "time,value\n${timeFrom},100\n${timeTo},100",
+          "refId": "B"
         }
       ],
-      "title": "CPU — full range (reference)",
+      "title": "CPU — full range with current window",
       "type": "timeseries"
     }
   ],
   "preload": false,
   "refresh": "",
   "schemaVersion": 42,
-  "tags": [
-    "timeline-controller",
-    "demo",
-    "sliding-window"
-  ],
+  "tags": ["timeline-controller", "demo", "sliding-window"],
   "templating": {
     "list": [
       {
-        "current": {
-          "selected": false,
-          "text": "",
-          "value": ""
-        },
-        "description": "Sliding window lower bound (Unix seconds). Populated by Timeline Controller on every tick.",
+        "current": { "selected": false, "text": "", "value": "" },
+        "description": "Sliding window lower bound, Unix milliseconds. Populated by Timeline Controller on every tick. Empty until Play is pressed — downstream queries will error or render blank until then, which is the intended 'no window' state.",
         "hide": 0,
         "label": "timeFrom",
         "name": "timeFrom",
@@ -375,12 +206,8 @@
         "type": "textbox"
       },
       {
-        "current": {
-          "selected": false,
-          "text": "",
-          "value": ""
-        },
-        "description": "Sliding window upper bound (Unix seconds). Populated by Timeline Controller on every tick.",
+        "current": { "selected": false, "text": "", "value": "" },
+        "description": "Sliding window upper bound, Unix milliseconds. Populated by Timeline Controller on every tick. Empty until Play is pressed.",
         "hide": 0,
         "label": "timeTo",
         "name": "timeTo",
@@ -393,11 +220,7 @@
         "auto": false,
         "auto_count": 30,
         "auto_min": "10s",
-        "current": {
-          "selected": true,
-          "text": "5m",
-          "value": "5m"
-        },
+        "current": { "selected": true, "text": "5m", "value": "5m" },
         "description": "Sliding window width. Source of truth for the step size; the panel's step dropdown reads and writes this variable.",
         "hide": 0,
         "label": "step",
@@ -416,14 +239,11 @@
       }
     ]
   },
-  "time": {
-    "from": "now-3h",
-    "to": "now"
-  },
+  "time": { "from": "now-3h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
   "title": "Sliding window — Timeline Controller demo",
   "uid": "tlc-sliding-demo",
-  "version": 1,
+  "version": 3,
   "weekStart": ""
 }

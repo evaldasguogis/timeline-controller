@@ -59,7 +59,6 @@
           "horizontalAlignment": "center",
           "tickIntervalMs": 1000,
           "timeStep": "5m",
-          "timeFormat": "s",
           "variableFrom": "timeFrom",
           "variableTo": "timeTo",
           "variableStep": "step",
