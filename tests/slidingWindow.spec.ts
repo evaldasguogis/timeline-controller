@@ -11,11 +11,18 @@ const readWindowVars = (url: string) => {
   };
 };
 
+// The dashboard's textbox-variable defaults are empty strings, so
+// `var-timeFrom=` / `var-timeTo=` may be present in the URL with empty
+// values immediately after navigation — before the panel mounts and seeds
+// them. Wait for actual numeric (ms) values, not just for the params to
+// exist.
 const waitForWindowWrite = (page: Page, timeoutMs = 5000) =>
   page.waitForFunction(
     () => {
       const params = new URL(window.location.href).searchParams;
-      return params.get('var-timeFrom') !== null && params.get('var-timeTo') !== null;
+      const from = params.get('var-timeFrom');
+      const to = params.get('var-timeTo');
+      return !!from && /^\d+$/.test(from) && !!to && /^\d+$/.test(to);
     },
     undefined,
     { timeout: timeoutMs }
@@ -71,19 +78,25 @@ test('Step forward writes var-timeFrom and var-timeTo to the URL', async ({
   const dashboard = await readProvisionedDashboard({ fileName: 'sliding-window-demo.json' });
   await gotoDashboardPage({ uid: dashboard.uid });
 
-  expect(readWindowVars(page.url())).toEqual({ from: null, to: null });
+  // The sliding-window panel seeds the variables on mount, so wait for the
+  // initial write and capture the seeded position before stepping forward.
+  await waitForWindowWrite(page);
+  const initial = readWindowVars(page.url());
+  expect(initial.from).toMatch(/^\d+$/);
+  expect(initial.to).toMatch(/^\d+$/);
 
   await page.getByLabel('Step forward').click();
-  await waitForWindowWrite(page);
+  await page.waitForFunction(
+    (prev) => new URL(window.location.href).searchParams.get('var-timeTo') !== prev,
+    initial.to,
+    { timeout: 5000 }
+  );
 
   const after = readWindowVars(page.url());
-  expect(after.from).not.toBeNull();
-  expect(after.to).not.toBeNull();
-  // Format is 's' in this dashboard — Unix seconds, integer string.
-  expect(after.from).toMatch(/^\d+$/);
-  expect(after.to).toMatch(/^\d+$/);
-  // The window is one step (5 minutes = 300 seconds) wide.
-  expect(Number(after.to) - Number(after.from)).toBe(300);
+  // Values are Unix milliseconds; the window is one step (5 minutes) wide.
+  expect(Number(after.to) - Number(after.from)).toBe(5 * 60 * 1000);
+  // Step forward shifted the window by one step.
+  expect(Number(after.from) - Number(initial.from)).toBe(5 * 60 * 1000);
 });
 
 test('Play forward keeps advancing the window until Pause', async ({
@@ -134,8 +147,8 @@ test('Jump to start writes the initial window and disables itself', async ({
 
   const after = readWindowVars(page.url());
   expect(after.from).not.toBe(stepped.from);
-  // After Jump to start the window is one step (300s) wide again, anchored to the
-  // global range's left edge.
-  expect(Number(after.to) - Number(after.from)).toBe(300);
+  // After Jump to start the window is one step (5 minutes in ms) wide again,
+  // anchored to the global range's left edge.
+  expect(Number(after.to) - Number(after.from)).toBe(5 * 60 * 1000);
   await expect(page.getByLabel('Jump to start')).toBeDisabled();
 });
