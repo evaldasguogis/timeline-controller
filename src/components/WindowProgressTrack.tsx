@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { css } from '@emotion/css';
 import { dateTime, GrafanaTheme2 } from '@grafana/data';
 import { Tooltip, useStyles2 } from '@grafana/ui';
@@ -11,6 +11,12 @@ import { Tooltip, useStyles2 } from '@grafana/ui';
 //
 // Exact bounds are surfaced via Grafana's <Tooltip> on hover and via
 // aria-valuetext for screen readers / tests.
+//
+// When `onCommit` is provided the segment becomes draggable (pointer + arrow
+// keys). The window's width — i.e. the step — is preserved; only the start
+// and end shift together. Drag emits one `onCommit` per `tickIntervalMs`
+// throttle window plus a final commit on release, so a long drag does not
+// flood the backend with variable writes.
 
 interface Range {
   from: number;
@@ -23,9 +29,33 @@ interface Props {
   // The current sliding window; rendered as a filled segment positioned and
   // sized relative to the boundary.
   current: Range;
+  // Optional: presence enables drag + keyboard nudge. The component does
+  // not own the window state — it asks the caller to apply each commit.
+  onCommit?: (next: Range) => void;
+  // Called once at pointerdown, before any movement. The caller should
+  // pause playback so an in-flight tick does not fight the drag.
+  onDragStart?: () => void;
+  // Arrow-key handler. The component does not know the step size — the
+  // caller decides what one nudge means (typically one step forward/back).
+  onNudge?: (forward: boolean) => void;
+  // Maximum commit cadence during drag. A final commit always fires on
+  // release. Only consulted when `onCommit` is set.
+  tickIntervalMs?: number;
 }
 
-const getStyles = (theme: GrafanaTheme2) => ({
+const getStyles = (theme: GrafanaTheme2, interactive: boolean) => ({
+  // Outer slider host: keeps the role/aria/keyboard contract isolated from
+  // Tooltip's cloneElement (which clobbers tabIndex + onKeyDown on its
+  // direct child). Stretches to fill the parent so the inner track fills
+  // its row instead of collapsing inside a flex container.
+  outer: css`
+    width: 100%;
+    &:focus-visible {
+      outline: 2px solid ${theme.colors.primary.main};
+      outline-offset: 2px;
+      border-radius: ${theme.shape.radius.default};
+    }
+  `,
   wrapper: css`
     position: relative;
     // Fill the container so the parent (panel layout) controls width. The
@@ -37,6 +67,9 @@ const getStyles = (theme: GrafanaTheme2) => ({
     border-radius: ${theme.shape.radius.default};
     overflow: hidden;
     cursor: default;
+    // Stop horizontal pan gestures from scrolling the page while the user
+    // is dragging the segment.
+    touch-action: ${interactive ? 'none' : 'auto'};
   `,
   segment: css`
     position: absolute;
@@ -48,6 +81,10 @@ const getStyles = (theme: GrafanaTheme2) => ({
     // the range (e.g. 1s step inside a 6h boundary) — otherwise the indicator
     // disappears and the bar looks empty.
     min-width: 3px;
+    cursor: ${interactive ? 'grab' : 'default'};
+    &:active {
+      cursor: ${interactive ? 'grabbing' : 'default'};
+    }
   `,
 });
 
@@ -63,27 +100,186 @@ const pct = (numerator: number, denominator: number): number => {
   return Math.min(Math.max(raw, 0), 100);
 };
 
-export const WindowProgressTrack: React.FC<Props> = ({ boundary, current }) => {
-  const styles = useStyles2(getStyles);
+const clampRange = (next: Range, boundary: Range): Range => {
+  const width = next.to - next.from;
+  const maxFrom = boundary.to - width;
+  if (maxFrom < boundary.from) {
+    // Window wider than the boundary — nothing meaningful to clamp to; leave
+    // the caller to decide (in practice this is gated upstream).
+    return next;
+  }
+  const from = Math.min(Math.max(next.from, boundary.from), maxFrom);
+  return { from, to: from + width };
+};
+
+interface DragState {
+  startClientX: number;
+  startWindow: Range;
+  wrapperWidth: number;
+  lastCommitMs: number;
+  lastCommittedWindow: Range;
+}
+
+export const WindowProgressTrack: React.FC<Props> = ({
+  boundary,
+  current,
+  onCommit,
+  onDragStart,
+  onNudge,
+  tickIntervalMs = 250,
+}) => {
+  const interactive = onCommit !== undefined;
+  const styles = useStyles2(getStyles, interactive);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const dragStateRef = useRef<DragState | null>(null);
+  // dragWindow shadows `current` during an active drag so the segment
+  // tracks the cursor at frame rate, independent of the throttled commits.
+  const [dragWindow, setDragWindow] = useState<Range | null>(null);
+
+  const displayWindow = dragWindow ?? current;
   const total = boundary.to - boundary.from;
-  const leftPct = pct(current.from - boundary.from, total);
-  const widthPct = pct(current.to - current.from, total);
+  const leftPct = pct(displayWindow.from - boundary.from, total);
+  const widthPct = pct(displayWindow.to - displayWindow.from, total);
+  const valueText = `${formatBound(displayWindow.from)} → ${formatBound(displayWindow.to)}`;
 
-  const valueText = `${formatBound(current.from)} → ${formatBound(current.to)}`;
+  const handlePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!interactive) {
+        return;
+      }
+      // Left mouse button only — ignore right-click / middle-click.
+      if (event.button !== 0) {
+        return;
+      }
+      const wrapper = wrapperRef.current;
+      if (wrapper === null) {
+        return;
+      }
+      const rect = wrapper.getBoundingClientRect();
+      dragStateRef.current = {
+        startClientX: event.clientX,
+        startWindow: current,
+        wrapperWidth: rect.width,
+        lastCommitMs: performance.now(),
+        lastCommittedWindow: current,
+      };
+      // Pointer capture lets us keep receiving moves even when the cursor
+      // leaves the segment (browsers route moves to whoever holds capture).
+      (event.target as Element).setPointerCapture?.(event.pointerId);
+      onDragStart?.();
+      event.preventDefault();
+    },
+    [interactive, current, onDragStart]
+  );
 
+  const handlePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const state = dragStateRef.current;
+      if (state === null) {
+        return;
+      }
+      if (state.wrapperWidth <= 0 || total <= 0) {
+        return;
+      }
+      const deltaPx = event.clientX - state.startClientX;
+      const deltaMs = (deltaPx / state.wrapperWidth) * total;
+      const next = clampRange(
+        { from: state.startWindow.from + deltaMs, to: state.startWindow.to + deltaMs },
+        boundary
+      );
+      setDragWindow(next);
+      const now = performance.now();
+      const changed =
+        next.from !== state.lastCommittedWindow.from || next.to !== state.lastCommittedWindow.to;
+      if (onCommit && changed && now - state.lastCommitMs >= tickIntervalMs) {
+        state.lastCommitMs = now;
+        state.lastCommittedWindow = next;
+        onCommit(next);
+      }
+    },
+    [boundary, onCommit, tickIntervalMs, total]
+  );
+
+  const handlePointerEnd = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const state = dragStateRef.current;
+      if (state === null) {
+        return;
+      }
+      const final = dragWindow;
+      dragStateRef.current = null;
+      setDragWindow(null);
+      try {
+        (event.target as Element).releasePointerCapture?.(event.pointerId);
+      } catch {
+        // The browser may have already released capture on its own (e.g.
+        // pointercancel from a system gesture); ignore.
+      }
+      if (!onCommit || final === null) {
+        return;
+      }
+      const changed =
+        final.from !== state.lastCommittedWindow.from ||
+        final.to !== state.lastCommittedWindow.to;
+      if (changed) {
+        onCommit(final);
+      }
+    },
+    [dragWindow, onCommit]
+  );
+
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!onNudge) {
+        return;
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        onNudge(true);
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        onNudge(false);
+      }
+    },
+    [onNudge]
+  );
+
+  // Why an extra outer wrapper instead of putting Tooltip directly around
+  // the track? Tooltip uses React.cloneElement to inject its own tabIndex
+  // and Floating-UI event handlers (e.g. Escape-to-dismiss onKeyDown) onto
+  // its child — which would clobber our slider semantics and arrow-key
+  // handler. Splitting them keeps the outer slider clean and lets Tooltip
+  // own only the visual track.
   return (
-    <Tooltip content={valueText} placement="top">
-      <div
-        className={styles.wrapper}
-        role="progressbar"
-        aria-label="Current window"
-        aria-valuemin={boundary.from}
-        aria-valuemax={boundary.to}
-        aria-valuenow={(current.from + current.to) / 2}
-        aria-valuetext={valueText}
-      >
-        <div className={styles.segment} style={{ left: `${leftPct}%`, width: `${widthPct}%` }} />
-      </div>
-    </Tooltip>
+    <div
+      className={styles.outer}
+      role={interactive ? 'slider' : 'progressbar'}
+      tabIndex={interactive ? 0 : undefined}
+      aria-label="Current window"
+      aria-valuemin={boundary.from}
+      aria-valuemax={boundary.to}
+      aria-valuenow={(displayWindow.from + displayWindow.to) / 2}
+      aria-valuetext={valueText}
+      aria-orientation={interactive ? 'horizontal' : undefined}
+      onKeyDown={interactive ? handleKeyDown : undefined}
+    >
+      {/* Tooltip is forwardRef; pass our ref through it. Putting `ref` on
+          the inner div would not work — Tooltip's cloneElement injects its
+          own ref via the same prop, overriding ours and leaving
+          wrapperRef.current null. */}
+      <Tooltip content={valueText} placement="top" ref={wrapperRef}>
+        <div className={styles.wrapper}>
+          <div
+            data-testid="window-segment"
+            className={styles.segment}
+            style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerEnd}
+            onPointerCancel={handlePointerEnd}
+          />
+        </div>
+      </Tooltip>
+    </div>
   );
 };

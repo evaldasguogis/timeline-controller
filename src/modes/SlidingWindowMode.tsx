@@ -424,6 +424,13 @@ export const SlidingWindowMode: React.FC<Props> = ({ options, onOptionsChange, t
           <WindowProgressTrack
             boundary={{ from: timeRange.from.valueOf(), to: timeRange.to.valueOf() }}
             current={displayWindow}
+            tickIntervalMs={sliding.tickIntervalMs}
+            onCommit={(next) => {
+              setCurrentWindow(next);
+              writeWindow(next);
+            }}
+            onDragStart={pause}
+            onNudge={step}
           />
         </div>
       )}

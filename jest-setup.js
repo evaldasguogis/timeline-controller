@@ -23,3 +23,37 @@ if (typeof window.IntersectionObserver === 'undefined') {
     }
   };
 }
+
+// jsdom (through v22+) doesn't implement PointerEvent, so
+// @testing-library's fireEvent.pointerDown/Move/Up falls back in a way
+// React's synthetic event system can't pick up — meaning onPointerDown
+// handlers never fire in tests. WindowProgressTrack uses pointer events
+// to make the segment draggable; this polyfill lets its tests exercise
+// that path. See https://github.com/jsdom/jsdom/issues/2527.
+if (typeof window.PointerEvent === 'undefined') {
+  window.PointerEvent = class PointerEvent extends MouseEvent {
+    constructor(type, params = {}) {
+      super(type, params);
+      this.pointerId = params.pointerId ?? 0;
+      this.pointerType = params.pointerType ?? '';
+      this.isPrimary = params.isPrimary ?? true;
+      this.width = params.width ?? 1;
+      this.height = params.height ?? 1;
+      this.pressure = params.pressure ?? 0;
+      this.tangentialPressure = params.tangentialPressure ?? 0;
+      this.tiltX = params.tiltX ?? 0;
+      this.tiltY = params.tiltY ?? 0;
+      this.twist = params.twist ?? 0;
+    }
+  };
+}
+// jsdom Elements lack setPointerCapture / releasePointerCapture. The drag
+// handler tolerates absence via optional chaining, but no-op stubs match
+// real-DOM behavior and avoid surprising any other consumer.
+if (typeof Element.prototype.setPointerCapture === 'undefined') {
+  Element.prototype.setPointerCapture = function () {};
+  Element.prototype.releasePointerCapture = function () {};
+  Element.prototype.hasPointerCapture = function () {
+    return false;
+  };
+}

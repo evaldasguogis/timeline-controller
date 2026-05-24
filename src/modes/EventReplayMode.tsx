@@ -370,6 +370,13 @@ export const EventReplayMode: React.FC<Props> = ({ options, onOptionsChange }) =
           <WindowProgressTrack
             boundary={{ from: event.boundaryFrom, to: event.boundaryTo }}
             current={displayWindow}
+            tickIntervalMs={event.tickIntervalMs}
+            onCommit={(next) => {
+              setCurrentWindow(next);
+              writeWindow(next);
+            }}
+            onDragStart={pause}
+            onNudge={step}
           />
         </div>
       )}
