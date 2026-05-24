@@ -19,6 +19,7 @@ import { TimeStepDropdown } from '../components/TimeStepDropdown';
 import { PlaybackControls } from '../components/PlaybackControls';
 import { WindowProgressTrack } from '../components/WindowProgressTrack';
 import { useReplay, TickResult } from '../hooks/useReplay';
+import { usePlaybackShortcuts } from '../hooks/usePlaybackShortcuts';
 
 // Event Replay is mechanically identical to Sliding Window — same writes,
 // same window math — except the boundary is panel-configured rather than
@@ -77,6 +78,10 @@ const getStyles = (theme: GrafanaTheme2, justifyContent: string, alignItems: str
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
     text-align: center;
+    // Read-only status text — keep the default arrow instead of the
+    // text-caret (I-beam) so it doesn't look like an editable field.
+    cursor: default;
+    user-select: none;
   `,
   controlsRow: css`
     display: flex;
@@ -311,6 +316,32 @@ export const EventReplayMode: React.FC<Props> = ({ options, onOptionsChange }) =
     setCurrentWindow(end);
   }, [pause, writeWindow]);
 
+  const handleTogglePlay = useCallback(() => {
+    if (state === 'paused') {
+      startPlayback(true);
+    } else {
+      pause();
+    }
+  }, [state, startPlayback, pause]);
+
+  const handleTogglePlayBackward = useCallback(() => {
+    if (state === 'paused') {
+      startPlayback(false);
+    } else {
+      pause();
+    }
+  }, [state, startPlayback, pause]);
+
+  const panelKeyboard = usePlaybackShortcuts({
+    togglePlay: handleTogglePlay,
+    togglePlayBackward: handleTogglePlayBackward,
+    pause,
+    stepBack: () => step(false),
+    stepForward: () => step(true),
+    jumpToStart: handleJumpToStart,
+    jumpToEnd: handleJumpToEnd,
+  });
+
   // Not wrapped in useCallback — see the same note in SlidingWindowMode.
   const handleTimeStepChange = (newTimeStep: TimeStep) => {
     if (intervalBinding) {
@@ -354,7 +385,7 @@ export const EventReplayMode: React.FC<Props> = ({ options, onOptionsChange }) =
   const stepLargerThanBoundary = stepMs > boundarySpan;
 
   return (
-    <div className={styles.wrapper}>
+    <div className={styles.wrapper} {...panelKeyboard}>
       {warnings.length > 0 && (
         <Alert severity="warning" title="Variable configuration">
           {warnings.map((msg) => (

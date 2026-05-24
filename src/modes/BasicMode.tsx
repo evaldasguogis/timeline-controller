@@ -13,6 +13,7 @@ import { TimeStepDropdown } from '../components/TimeStepDropdown';
 import { PlaybackControls } from '../components/PlaybackControls';
 import { useExternalTimeRangeWatcher } from '../hooks/useExternalTimeRangeWatcher';
 import { TickResult, useReplay } from '../hooks/useReplay';
+import { usePlaybackShortcuts } from '../hooks/usePlaybackShortcuts';
 
 // Basic mode is the zero-config mode: drop the panel on any dashboard and it
 // works. It drives the dashboard's *global* time picker — every time-aware
@@ -205,6 +206,31 @@ export const BasicMode: React.FC<Props> = ({ options, onOptionsChange, timeRange
     setHasStepped(false);
   }, [pause, writeRange, baselineRaw]);
 
+  const handleTogglePlay = useCallback(() => {
+    if (state === 'paused') {
+      startPlayback(true);
+    } else {
+      pause();
+    }
+  }, [state, startPlayback, pause]);
+
+  const handleTogglePlayBackward = useCallback(() => {
+    if (state === 'paused') {
+      startPlayback(false);
+    } else {
+      pause();
+    }
+  }, [state, startPlayback, pause]);
+
+  const panelKeyboard = usePlaybackShortcuts({
+    togglePlay: handleTogglePlay,
+    togglePlayBackward: handleTogglePlayBackward,
+    pause,
+    stepBack: () => step(false),
+    stepForward: () => step(true),
+    reset: handleReset,
+  });
+
   const stepMs = stepToMillis(activeStep);
   // Wall-clock "now" is intentionally read at render time so the forward-
   // disabled state stays current after each prop change. Date.now() is
@@ -220,7 +246,7 @@ export const BasicMode: React.FC<Props> = ({ options, onOptionsChange, timeRange
   const resetDisabled = !hasStepped;
 
   return (
-    <div className={styles.wrapper}>
+    <div className={styles.wrapper} {...panelKeyboard}>
       <PlaybackControls
         state={state}
         stepLabel={activeStep}
@@ -246,7 +272,7 @@ export const BasicMode: React.FC<Props> = ({ options, onOptionsChange, timeRange
         aria-label="Reset"
         tooltip={
           <div>
-            <div>Restore the original time range</div>
+            <div>Restore the original time range  [R]</div>
             <div className={styles.tooltipSecondary}>
               {formatTimeBound(baselineRaw.from)} → {formatTimeBound(baselineRaw.to)}
             </div>

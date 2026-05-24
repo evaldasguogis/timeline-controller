@@ -44,20 +44,19 @@ interface Props {
 }
 
 const getStyles = (theme: GrafanaTheme2, interactive: boolean) => ({
-  // Outer slider host: keeps the role/aria/keyboard contract isolated from
-  // Tooltip's cloneElement (which clobbers tabIndex + onKeyDown on its
-  // direct child). Stretches to fill the parent so the inner track fills
-  // its row instead of collapsing inside a flex container.
+  // Outer host: owns the bubbled arrow-key handler and stretches to fill
+  // the parent so the inner track does not collapse inside a flex
+  // container. Not focusable — Tooltip injects tabIndex=0 onto its child
+  // (the wrapper below), and that single Tab stop is enough.
   outer: css`
     width: 100%;
-    &:focus-visible {
-      outline: 2px solid ${theme.colors.primary.main};
-      outline-offset: 2px;
-      border-radius: ${theme.shape.radius.default};
-    }
   `,
   wrapper: css`
     position: relative;
+    &:focus-visible {
+      outline: 2px solid ${theme.colors.primary.main};
+      outline-offset: 2px;
+    }
     // Fill the container so the parent (panel layout) controls width. The
     // bar reads naturally as a "timeline" when it spans the available row.
     width: 100%;
@@ -244,23 +243,17 @@ export const WindowProgressTrack: React.FC<Props> = ({
     [onNudge]
   );
 
-  // Why an extra outer wrapper instead of putting Tooltip directly around
-  // the track? Tooltip uses React.cloneElement to inject its own tabIndex
-  // and Floating-UI event handlers (e.g. Escape-to-dismiss onKeyDown) onto
-  // its child — which would clobber our slider semantics and arrow-key
-  // handler. Splitting them keeps the outer slider clean and lets Tooltip
-  // own only the visual track.
+  // The outer wrapper exists only to host the arrow-key handler. Tooltip's
+  // cloneElement injects tabIndex=0 and Floating-UI event handlers onto its
+  // direct child, which would clobber any keyboard handler we put there —
+  // so we attach onKeyDown to the outer and let the focused inner bubble
+  // events up. Slider role + aria-* live on the inner (the focusable Tab
+  // stop) so screen readers announce them when the track has focus, and
+  // the outer is intentionally not tabbable to keep the track to ONE Tab
+  // stop in spite of Tooltip's injected tabIndex.
   return (
     <div
       className={styles.outer}
-      role={interactive ? 'slider' : 'progressbar'}
-      tabIndex={interactive ? 0 : undefined}
-      aria-label="Current window"
-      aria-valuemin={boundary.from}
-      aria-valuemax={boundary.to}
-      aria-valuenow={(displayWindow.from + displayWindow.to) / 2}
-      aria-valuetext={valueText}
-      aria-orientation={interactive ? 'horizontal' : undefined}
       onKeyDown={interactive ? handleKeyDown : undefined}
     >
       {/* Tooltip is forwardRef; pass our ref through it. Putting `ref` on
@@ -268,7 +261,16 @@ export const WindowProgressTrack: React.FC<Props> = ({
           own ref via the same prop, overriding ours and leaving
           wrapperRef.current null. */}
       <Tooltip content={valueText} placement="top" ref={wrapperRef}>
-        <div className={styles.wrapper}>
+        <div
+          className={styles.wrapper}
+          role={interactive ? 'slider' : 'progressbar'}
+          aria-label="Current window"
+          aria-valuemin={boundary.from}
+          aria-valuemax={boundary.to}
+          aria-valuenow={(displayWindow.from + displayWindow.to) / 2}
+          aria-valuetext={valueText}
+          aria-orientation={interactive ? 'horizontal' : undefined}
+        >
           <div
             data-testid="window-segment"
             className={styles.segment}

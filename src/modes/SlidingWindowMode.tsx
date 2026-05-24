@@ -19,6 +19,7 @@ import { TimeStepDropdown } from '../components/TimeStepDropdown';
 import { PlaybackControls } from '../components/PlaybackControls';
 import { WindowProgressTrack } from '../components/WindowProgressTrack';
 import { useReplay, TickResult } from '../hooks/useReplay';
+import { usePlaybackShortcuts } from '../hooks/usePlaybackShortcuts';
 
 // Sliding Window mode writes a pair of template variables instead of driving
 // the global time range. The consumer data source uses the variables in its
@@ -79,6 +80,10 @@ const getStyles = (theme: GrafanaTheme2, justifyContent: string, alignItems: str
     font-size: ${theme.typography.bodySmall.fontSize};
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
+    // Read-only status text — keep the default arrow instead of the
+    // text-caret (I-beam) so it doesn't look like an editable field.
+    cursor: default;
+    user-select: none;
     text-align: center;
   `,
   controlsRow: css`
@@ -351,6 +356,32 @@ export const SlidingWindowMode: React.FC<Props> = ({ options, onOptionsChange, t
     setCurrentWindow(end);
   }, [pause, writeWindow]);
 
+  const handleTogglePlay = useCallback(() => {
+    if (state === 'paused') {
+      startPlayback(true);
+    } else {
+      pause();
+    }
+  }, [state, startPlayback, pause]);
+
+  const handleTogglePlayBackward = useCallback(() => {
+    if (state === 'paused') {
+      startPlayback(false);
+    } else {
+      pause();
+    }
+  }, [state, startPlayback, pause]);
+
+  const panelKeyboard = usePlaybackShortcuts({
+    togglePlay: handleTogglePlay,
+    togglePlayBackward: handleTogglePlayBackward,
+    pause,
+    stepBack: () => step(false),
+    stepForward: () => step(true),
+    jumpToStart: handleJumpToStart,
+    jumpToEnd: handleJumpToEnd,
+  });
+
   // Not wrapped in useCallback unlike the jump-to-* handlers: every dep
   // (`intervalBinding`, `sliding`, `options`) is a fresh reference each
   // render, so useCallback wouldn't stabilize the returned function — it'd
@@ -408,7 +439,7 @@ export const SlidingWindowMode: React.FC<Props> = ({ options, onOptionsChange, t
   }
 
   return (
-    <div className={styles.wrapper}>
+    <div className={styles.wrapper} {...panelKeyboard}>
       {validation.warnings.length > 0 && (
         <Alert severity="warning" title="Variable configuration">
           {validation.warnings.map((msg) => (

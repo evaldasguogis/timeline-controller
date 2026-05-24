@@ -58,13 +58,16 @@ export const PlaybackControls: React.FC<Props> = ({
 }) => {
   const styles = useStyles2(getStyles);
 
+  // Tooltips append the keyboard shortcut in brackets — usePlaybackShortcuts
+  // wires the same keys at the panel level, so users discover them here
+  // without needing a separate help screen.
   return (
     <ButtonGroup aria-label="Playback controls">
       {onJumpToStart && (
         <ToolbarButton
           icon="step-backward"
           aria-label="Jump to start"
-          tooltip="Jump to start of range"
+          tooltip="Jump to start of range  [Home]"
           disabled={jumpToStartDisabled}
           iconSize="xl"
           onClick={onJumpToStart}
@@ -73,7 +76,7 @@ export const PlaybackControls: React.FC<Props> = ({
       <ToolbarButton
         icon="angle-double-left"
         aria-label="Step back"
-        tooltip={`Step back by ${stepLabel}`}
+        tooltip={`Step back by ${stepLabel}  [,]`}
         disabled={backwardDisabled}
         iconSize="xl"
         onClick={onStepBack}
@@ -81,7 +84,7 @@ export const PlaybackControls: React.FC<Props> = ({
       <ToolbarButton
         icon="play"
         aria-label="Play backward"
-        tooltip={`Play backward (${stepLabel} per tick)`}
+        tooltip={`Play backward (${stepLabel} per tick)  [J]`}
         disabled={backwardDisabled}
         variant={state === 'playing-back' ? 'active' : 'default'}
         iconSize="xl"
@@ -91,7 +94,7 @@ export const PlaybackControls: React.FC<Props> = ({
       <ToolbarButton
         icon="pause"
         aria-label="Pause"
-        tooltip="Pause"
+        tooltip="Pause  [Esc]"
         variant={state === 'paused' ? 'active' : 'default'}
         iconSize="xl"
         onClick={onPause}
@@ -99,7 +102,7 @@ export const PlaybackControls: React.FC<Props> = ({
       <ToolbarButton
         icon="play"
         aria-label="Play forward"
-        tooltip={`Play forward (${stepLabel} per tick)`}
+        tooltip={`Play forward (${stepLabel} per tick)  [K]`}
         disabled={forwardDisabled}
         variant={state === 'playing-forward' ? 'active' : 'default'}
         iconSize="xl"
@@ -108,7 +111,7 @@ export const PlaybackControls: React.FC<Props> = ({
       <ToolbarButton
         icon="angle-double-right"
         aria-label="Step forward"
-        tooltip={`Step forward by ${stepLabel}`}
+        tooltip={`Step forward by ${stepLabel}  [.]`}
         disabled={forwardDisabled}
         iconSize="xl"
         onClick={onStepForward}
@@ -117,7 +120,7 @@ export const PlaybackControls: React.FC<Props> = ({
         <ToolbarButton
           icon="step-backward"
           aria-label="Jump to end"
-          tooltip="Jump to end of range"
+          tooltip="Jump to end of range  [End]"
           disabled={jumpToEndDisabled}
           iconSize="xl"
           className={styles.mirrored}
