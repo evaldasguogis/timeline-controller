@@ -3,7 +3,13 @@ import { css } from '@emotion/css';
 import { EventBus, GrafanaTheme2, TimeRange } from '@grafana/data';
 import { locationService } from '@grafana/runtime';
 import { Button, useStyles2 } from '@grafana/ui';
-import { HorizontalAlignment, TimeStep, TimelineControllerOptions, VerticalAlignment } from '../types';
+import {
+  BasicModeOptions,
+  HorizontalAlignment,
+  TimeStep,
+  TimelineControllerOptions,
+  VerticalAlignment,
+} from '../types';
 import { formatTimeBound } from '../utils/timeBound';
 import { readIntervalVariable } from '../utils/intervalVariable';
 import { setVariables } from '../utils/variables';
@@ -11,15 +17,15 @@ import { TimeStepDropdown } from '../components/TimeStepDropdown';
 import { PlaybackControls } from '../components/PlaybackControls';
 import { useGlobalRangeReplay } from '../hooks/useGlobalRangeReplay';
 
-// Basic mode is the zero-config mode: drop the panel on any dashboard and it
-// works. It drives the dashboard's *global* time picker — every time-aware
-// panel reacts automatically. The other modes write template variables and
-// require dashboard preparation; this one doesn't.
+// Basic mode drives the dashboard's *global* time picker — every time-aware
+// panel reacts automatically, so it's the zero-config mode. Sibling to
+// `WindowedMode` (Sliding / Event), which writes template variables instead
+// and requires dashboard preparation.
 //
-// The playback engine (transport, baseline tracking, Reset, external-change
-// detection, keyboard shortcuts) lives in `useGlobalRangeReplay`. This file
-// owns the mode-specific shell: usage-marker sync, the step-dropdown UI,
-// and rendering.
+// All transport / baseline / Reset / external-change-detection lives in
+// `useGlobalRangeReplay`. This file is the mode-specific shell: usage-marker
+// sync for the optional step variable, step-dropdown wiring, and the
+// single-row rendering.
 
 interface Props {
   options: TimelineControllerOptions;
@@ -44,6 +50,10 @@ const verticalToAlignItems: Record<VerticalAlignment, string> = {
 };
 
 const getStyles = (theme: GrafanaTheme2, justifyContent: string, alignItems: string) => ({
+  // Single-row layout: transport controls + step dropdown + Reset all sit on
+  // one horizontal axis. WindowedMode is stacked (scrubber over controls);
+  // Basic has no scrubber, so collapsing to one row keeps the panel compact
+  // and lets a Stat / Markdown panel sit next to it without towering over.
   wrapper: css`
     display: flex;
     flex-direction: row;
@@ -76,62 +86,61 @@ const getStyles = (theme: GrafanaTheme2, justifyContent: string, alignItems: str
   `,
 });
 
+// Build the synthetic usage marker for Grafana's "Used by panels" scan.
+// Single-slot (vs the three-slot helper in WindowedMode) because Basic
+// only publishes one optional variable: the step. Auto-synced from
+// `variableStep` — users never edit `_variableStep` directly.
+const buildUsageMarkers = (b: BasicModeOptions) => ({
+  _variableStep: b.variableStep.trim() ? `\${${b.variableStep}}` : '',
+});
+
 export const BasicMode: React.FC<Props> = ({ options, onOptionsChange, timeRange, eventBus }) => {
-  const justifyContent = horizontalToJustify[options.basic.horizontalAlignment] ?? 'center';
-  const alignItems = verticalToAlignItems[options.basic.verticalAlignment] ?? 'center';
+  const basic = options.basic;
+  const justifyContent = horizontalToJustify[basic.horizontalAlignment] ?? 'center';
+  const alignItems = verticalToAlignItems[basic.verticalAlignment] ?? 'center';
   const styles = useStyles2((theme) => getStyles(theme, justifyContent, alignItems));
 
-  // Variable values live in the URL (`var-<name>=<value>`). Our plugin has
-  // `skipDataQuery: true`, so Grafana doesn't include us in its variable-
-  // driven re-render path — even though the `_variableStep` field gets us
-  // listed as "used by" in dashboard settings, no re-render is scheduled
-  // when a referenced variable changes. Subscribing to history changes is
-  // the workaround: any URL update (our own writes or external picks via
-  // Grafana's variable bar) bumps a render.
-  //
-  // Known issue: changing options in the editor sometimes leaves a blinking
-  // caret on a panel button. Cause not yet identified — see CLAUDE.local.md.
+  // Our plugin has skipDataQuery, so Grafana won't re-render us when a
+  // referenced variable changes. Subscribing to history changes is what
+  // keeps the step dropdown in sync when the user picks a step from a
+  // bound interval variable's dashboard-level dropdown.
   const [, bumpRender] = useReducer((x: number) => x + 1, 0);
   useEffect(() => locationService.getHistory().listen(bumpRender), []);
 
-  // Keep `_variableStep` in sync with `variableStep` so Grafana's static
-  // scan always sees the right `${name}` reference. Per-slot field (not a
-  // combined marker) means Grafana's "missing variable" hint can point
-  // straight at the broken binding. The check short-circuits when already
-  // synced, so this is a no-op after the first pass.
+  // Keep the synthetic usage marker in sync so Grafana's "Used by panels"
+  // scan always sees the current `${variableStep}` reference (or empty
+  // string when the binding is blank).
   useEffect(() => {
-    const expected = options.basic.variableStep ? `\${${options.basic.variableStep}}` : '';
-    if (options.basic._variableStep !== expected) {
-      onOptionsChange({
-        ...options,
-        basic: { ...options.basic, _variableStep: expected },
-      });
+    const expected = buildUsageMarkers(basic);
+    if (basic._variableStep !== expected._variableStep) {
+      onOptionsChange({ ...options, basic: { ...basic, ...expected } });
     }
-  }, [options, onOptionsChange]);
+  }, [options, onOptionsChange, basic]);
 
-  // When the user has bound step to a dashboard interval variable, the
-  // variable's option list and current value drive the dropdown — the
-  // built-in list is bypassed. Resolves to null if the binding is blank,
-  // the variable doesn't exist, or it's the wrong type; callers fall back
-  // to options.basic.timeStep in that case.
-  const intervalBinding = readIntervalVariable(options.basic.variableStep);
-  const activeStep = intervalBinding?.current ?? options.basic.timeStep;
+  // Variable-driven step: when the user binds variableStep to a dashboard
+  // interval variable, that variable's option list and current value drive
+  // the step picker. Returns null when blank/missing/wrong type, in which
+  // case we fall back to basic.timeStep.
+  const intervalBinding = readIntervalVariable(basic.variableStep);
+  const activeStep = intervalBinding?.current ?? basic.timeStep;
 
   const playback = useGlobalRangeReplay({
     timeRange,
     eventBus,
     step: activeStep,
-    tickIntervalMs: options.basic.tickIntervalMs,
+    tickIntervalMs: basic.tickIntervalMs,
   });
 
+  // Not wrapped in useCallback: every render brings a fresh `basic` (parent
+  // deep-merges defaults), so a memo would never hit.
   const handleTimeStepChange = (newTimeStep: TimeStep) => {
     if (intervalBinding) {
       // Variable-driven: write to the dashboard variable. The URL change
       // fires our location listener above, triggering a re-render with the
       // updated `intervalBinding.current`.
-      setVariables({ [options.basic.variableStep]: newTimeStep });
+      setVariables({ [basic.variableStep]: newTimeStep });
     } else {
-      onOptionsChange({ ...options, basic: { ...options.basic, timeStep: newTimeStep } });
+      onOptionsChange({ ...options, basic: { ...basic, timeStep: newTimeStep } });
     }
   };
 

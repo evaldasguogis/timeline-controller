@@ -143,17 +143,20 @@ export const useWindowedReplay = ({
   // Per-tick write. Step is not written here — modes that publish a
   // step variable do it once when the user picks it via the dropdown,
   // not per tick. Suppresses writes during error states via the ref.
-  const writeWindow = useCallback((win: WindowMs) => {
-    if (hasErrorsRef.current) {
-      return;
-    }
-    const spec = variableSpecRef.current;
-    const values: VariableValues = {
-      [spec.from]: encodeTimeValue(win.from),
-      [spec.to]: encodeTimeValue(win.to),
-    };
-    setVariables(values);
-  }, []);
+  const writeWindow = useCallback(
+    (win: WindowMs) => {
+      if (hasErrorsRef.current) {
+        return;
+      }
+      const spec = variableSpecRef.current;
+      const values: VariableValues = {
+        [spec.from]: encodeTimeValue(win.from),
+        [spec.to]: encodeTimeValue(win.to),
+      };
+      setVariables(values);
+    },
+    [hasErrorsRef, variableSpecRef]
+  );
 
   const handleTick = useCallback(
     (forward: boolean): TickResult => {
@@ -166,7 +169,7 @@ export const useWindowedReplay = ({
       writeWindow(next);
       return { boundaryHit };
     },
-    [writeWindow]
+    [writeWindow, boundaryRef, currentWindowRef, initialPositionRef, stepRef]
   );
 
   const { state, startPlayback, pause, step } = useReplay({
@@ -198,7 +201,7 @@ export const useWindowedReplay = ({
       setCurrentWindow(initial);
       writeWindow(initial);
     },
-    [pause, writeWindow]
+    [pause, writeWindow, initialPositionRef, stepRef]
   );
 
   useEffect(() => {
@@ -238,7 +241,7 @@ export const useWindowedReplay = ({
     const next: WindowMs = { from, to };
     setCurrentWindow(next);
     writeWindow(next);
-  }, [timeStep, writeWindow]);
+  }, [timeStep, writeWindow, boundaryRef, currentWindowRef]);
 
   // Snap the window to the boundary's edges. Both pause first — jumping
   // implicitly stops any active playback, otherwise the next tick would
@@ -251,7 +254,7 @@ export const useWindowedReplay = ({
     const win = initialWindowFor(b.from, b.to, stepRef.current, 'start');
     writeWindow(win);
     setCurrentWindow(win);
-  }, [pause, writeWindow]);
+  }, [pause, writeWindow, boundaryRef, stepRef]);
 
   const jumpToEnd = useCallback(() => {
     pause();
@@ -263,7 +266,7 @@ export const useWindowedReplay = ({
     };
     writeWindow(win);
     setCurrentWindow(win);
-  }, [pause, writeWindow]);
+  }, [pause, writeWindow, boundaryRef, stepRef]);
 
   // Drag-commit / arrow-nudge: WindowProgressTrack hands us a pre-clamped
   // window via onCommit; we set state AND publish to variables. The track

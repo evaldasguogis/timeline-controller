@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLiveRef } from './useLiveRef';
 
 export type PlaybackState = 'playing-back' | 'playing-forward' | 'paused';
 
@@ -34,16 +35,8 @@ export const useReplay = ({ tickIntervalMs, onTick }: UseReplayOptions): UseRepl
   // values rather than the closure captured when setInterval started —
   // otherwise changing tickIntervalMs or onTick mid-playback would have no
   // effect until the user paused and resumed.
-  const onTickRef = useRef(onTick);
-  const tickIntervalMsRef = useRef(tickIntervalMs);
-
-  useEffect(() => {
-    onTickRef.current = onTick;
-  }, [onTick]);
-
-  useEffect(() => {
-    tickIntervalMsRef.current = tickIntervalMs;
-  }, [tickIntervalMs]);
+  const onTickRef = useLiveRef(onTick);
+  const tickIntervalMsRef = useLiveRef(tickIntervalMs);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -65,7 +58,7 @@ export const useReplay = ({ tickIntervalMs, onTick }: UseReplayOptions): UseRepl
         setState('paused');
       }
     },
-    [clearTimer]
+    [clearTimer, onTickRef]
   );
 
   const startPlayback = useCallback(
@@ -74,7 +67,7 @@ export const useReplay = ({ tickIntervalMs, onTick }: UseReplayOptions): UseRepl
       timerRef.current = setInterval(() => runTick(forward), tickIntervalMsRef.current);
       setState(forward ? 'playing-forward' : 'playing-back');
     },
-    [clearTimer, runTick]
+    [clearTimer, runTick, tickIntervalMsRef]
   );
 
   const step = useCallback(
@@ -86,7 +79,7 @@ export const useReplay = ({ tickIntervalMs, onTick }: UseReplayOptions): UseRepl
       pause();
       onTickRef.current(forward);
     },
-    [pause]
+    [pause, onTickRef]
   );
 
   // Stop any active interval on unmount so an out-of-tree tick can't fire

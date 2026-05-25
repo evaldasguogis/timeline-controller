@@ -26,15 +26,6 @@ export type Mode = 'basic' | 'sliding' | 'event';
 // position); `end` flushes it against the upper bound ("rewind from now").
 export type WindowPosition = 'start' | 'end';
 
-// How an absolute timestamp is encoded into the variable. Mirrors Grafana's
-// built-in $__from/$__to flavors:
-// Window bounds are written to the configured template variables as Unix
-// milliseconds — matches Grafana's internal Time-field convention and lets
-// `${var:date:iso}` render the value as a readable datetime in markdown
-// panels. Consumers who need seconds (e.g. PromQL `time()` comparisons)
-// multiply `time()` by 1000 at the query site; we don't push that knob
-// into the panel surface.
-
 // timeStep and tickIntervalMs are deliberately separate concepts:
 //   timeStep      = how *much* the window moves on each tick (e.g. 5m)
 //   tickIntervalMs = how *often* a tick happens (e.g. every 1000ms)
@@ -69,12 +60,12 @@ export const defaultBasicModeOptions: BasicModeOptions = {
   verticalAlignment: 'middle',
 };
 
-// SlidingWindowMode writes a pair of template variables every tick instead of
-// driving the global time range. The consumer data source uses those variables
-// in its query's time-filter position. Variable names are configurable per
-// panel so multiple Timeline Controllers can coexist on one dashboard with
-// non-colliding scopes.
-export interface SlidingWindowModeOptions {
+// Shared shape behind Sliding and Event modes. Both write a pair of template
+// variables every tick across some boundary — the only difference is where
+// the boundary comes from (dashboard global range vs. panel-saved bounds),
+// which is why this is a base interface rather than a fully-shared options
+// object. `WindowedMode` is the component that renders either of these.
+export interface WindowedModeOptions {
   timeStep: TimeStep;
   tickIntervalMs: number;
   // Template variable name (without `var-` prefix) that receives the window's
@@ -112,6 +103,13 @@ export interface SlidingWindowModeOptions {
   verticalAlignment: VerticalAlignment;
 }
 
+// SlidingWindowMode writes a pair of template variables every tick instead of
+// driving the global time range. The consumer data source uses those variables
+// in its query's time-filter position. Variable names are configurable per
+// panel so multiple Timeline Controllers can coexist on one dashboard with
+// non-colliding scopes. The boundary is the dashboard's global time range.
+export type SlidingWindowModeOptions = WindowedModeOptions;
+
 export const defaultSlidingWindowModeOptions: SlidingWindowModeOptions = {
   timeStep: defaultTimeStep,
   tickIntervalMs: 1000,
@@ -130,24 +128,12 @@ export const defaultSlidingWindowModeOptions: SlidingWindowModeOptions = {
 // from the dashboard's global time picker. Pick this when the time range
 // being replayed is a specific historical event that should stay fixed
 // regardless of the dashboard's current view.
-export interface EventReplayModeOptions {
-  timeStep: TimeStep;
-  tickIntervalMs: number;
+export interface EventReplayModeOptions extends WindowedModeOptions {
   // Configured boundary. Absolute Unix milliseconds; both must be > 0 and
   // from < to for the mode to render. The DateTimePicker editor enforces
   // pickable values; the validator catches the unset / inverted cases.
   boundaryFrom: number;
   boundaryTo: number;
-  variableFrom: string;
-  variableTo: string;
-  variableStep: string;
-  _variableFrom?: string;
-  _variableTo?: string;
-  _variableStep?: string;
-  showProgressTrack: boolean;
-  initialPosition: WindowPosition;
-  horizontalAlignment: HorizontalAlignment;
-  verticalAlignment: VerticalAlignment;
 }
 
 export const defaultEventReplayModeOptions: EventReplayModeOptions = {

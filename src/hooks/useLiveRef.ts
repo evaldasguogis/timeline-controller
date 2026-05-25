@@ -20,6 +20,12 @@ import { useEffect, useRef, MutableRefObject } from 'react';
 // we can delete this helper and replace each `useLiveRef(x).current`
 // read with a direct closure read inside a `useEffectEvent`. See
 // https://react.dev/reference/react/experimental_useEffectEvent.
+//
+// Lint note: react-hooks/exhaustive-deps only recognizes `useRef` (and a
+// short builtin list) as returning a stable value. It can't be configured
+// to add custom hooks. So callbacks/effects that read `useLiveRef(...).current`
+// must list the ref in their dep array even though the identity never
+// changes — a noisy but cost-free concession to the rule.
 export const useLiveRef = <T>(value: T): MutableRefObject<T> => {
   const ref = useRef<T>(value);
   useEffect(() => {

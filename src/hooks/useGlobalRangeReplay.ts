@@ -128,7 +128,7 @@ export const useGlobalRangeReplay = ({
       setHasStepped(true);
       return { boundaryHit };
     },
-    [writeRange]
+    [writeRange, stepRef]
   );
 
   const { state, startPlayback, pause, step } = useReplay({
@@ -165,7 +165,7 @@ export const useGlobalRangeReplay = ({
       setHasStepped(false);
     });
     return () => sub.unsubscribe();
-  }, [eventBus, pause]);
+  }, [eventBus, pause, baselineRawRef]);
 
   const reset = useCallback(() => {
     pause();
