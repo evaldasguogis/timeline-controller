@@ -1,13 +1,15 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { css } from '@emotion/css';
-import { dateTime, GrafanaTheme2 } from '@grafana/data';
+import { GrafanaTheme2 } from '@grafana/data';
 import { Tooltip, useStyles2 } from '@grafana/ui';
+import { formatTimeBound } from '../utils/timeBound';
 
-// Visual position indicator for the sliding window: the wrapper bar is the
-// dashboard's global range, the inner segment is the current window. Lets the
-// user see at a glance both *where* the window is and *what fraction* of
-// the range it covers — information the old text label couldn't convey
-// without doing arithmetic.
+// Visual position indicator for the window-driven modes (Sliding + Event):
+// the wrapper bar represents the configured boundary (dashboard's global
+// range for Sliding, panel-saved range for Event), and the inner segment is
+// the current window. Lets the user see at a glance both *where* the
+// window is and *what fraction* of the range it covers — information the
+// old text label couldn't convey without doing arithmetic.
 //
 // Exact bounds are surfaced via Grafana's <Tooltip> on hover and via
 // aria-valuetext for screen readers / tests.
@@ -24,10 +26,10 @@ interface Range {
 }
 
 interface Props {
-  // The dashboard's global range; the bar's full width represents [from, to].
+  // The window's outer boundary; the bar's full width represents [from, to].
   boundary: Range;
-  // The current sliding window; rendered as a filled segment positioned and
-  // sized relative to the boundary.
+  // The current window; rendered as a filled segment positioned and sized
+  // relative to the boundary.
   current: Range;
   // Optional: presence enables drag + keyboard nudge. The component does
   // not own the window state — it asks the caller to apply each commit.
@@ -87,8 +89,6 @@ const getStyles = (theme: GrafanaTheme2, interactive: boolean) => ({
   `,
 });
 
-const formatBound = (ms: number): string => dateTime(ms).format('YYYY-MM-DD HH:mm:ss');
-
 const pct = (numerator: number, denominator: number): number => {
   if (denominator <= 0) {
     return 0;
@@ -139,7 +139,7 @@ export const WindowProgressTrack: React.FC<Props> = ({
   const total = boundary.to - boundary.from;
   const leftPct = pct(displayWindow.from - boundary.from, total);
   const widthPct = pct(displayWindow.to - displayWindow.from, total);
-  const valueText = `${formatBound(displayWindow.from)} → ${formatBound(displayWindow.to)}`;
+  const valueText = `${formatTimeBound(displayWindow.from)} → ${formatTimeBound(displayWindow.to)}`;
 
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {

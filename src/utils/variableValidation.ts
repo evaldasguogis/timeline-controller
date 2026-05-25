@@ -1,8 +1,9 @@
 import { getTemplateSrv } from '@grafana/runtime';
 
-// Minimal shape needed for variable validation. Both VariableConfig
-// and EventReplayModeOptions match — the validator only cares about the
-// three variable-name fields.
+// Minimal shape needed for variable validation. WindowedModeOptions (and so
+// SlidingWindowModeOptions / EventReplayModeOptions) structurally satisfies
+// this — the validator only cares about the three variable-name fields, so
+// it can run against either mode's options without an explicit conversion.
 export interface VariableConfig {
   variableFrom: string;
   variableTo: string;

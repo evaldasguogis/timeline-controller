@@ -22,11 +22,11 @@ interface Props {
 // — it inherits the dashboard's range and can assume it's valid — but Event
 // Replay has to flag unset / inverted bounds so the user sees an actionable
 // error instead of a silently-broken panel.
-const validateBoundary = (event: EventReplayModeOptions): string[] => {
-  if (event.boundaryFrom <= 0 || event.boundaryTo <= 0) {
+const validateBoundary = (options: EventReplayModeOptions): string[] => {
+  if (options.boundaryFrom <= 0 || options.boundaryTo <= 0) {
     return ['Event boundary is not set. Configure "From" and "To" in the panel options.'];
   }
-  if (event.boundaryFrom >= event.boundaryTo) {
+  if (options.boundaryFrom >= options.boundaryTo) {
     return ['Event boundary "From" must be before "To".'];
   }
   return [];

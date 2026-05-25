@@ -90,8 +90,8 @@ const getStyles = (theme: GrafanaTheme2, justifyContent: string, alignItems: str
 // Single-slot (vs the three-slot helper in WindowedMode) because Basic
 // only publishes one optional variable: the step. Auto-synced from
 // `variableStep` — users never edit `_variableStep` directly.
-const buildUsageMarkers = (b: BasicModeOptions) => ({
-  _variableStep: b.variableStep.trim() ? `\${${b.variableStep}}` : '',
+const buildUsageMarkers = (basic: BasicModeOptions) => ({
+  _variableStep: basic.variableStep.trim() ? `\${${basic.variableStep}}` : '',
 });
 
 export const BasicMode: React.FC<Props> = ({ options, onOptionsChange, timeRange, eventBus }) => {

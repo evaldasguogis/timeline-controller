@@ -1,7 +1,8 @@
 import React from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2, StandardEditorProps } from '@grafana/data';
-import { getTemplateSrv, locationService } from '@grafana/runtime';
+import { getTemplateSrv } from '@grafana/runtime';
+import { openDashboardVariables } from '../utils/navigation';
 import { Combobox, ComboboxOption, Icon, Tooltip, useStyles2 } from '@grafana/ui';
 
 // Panel-option editor for choosing a dashboard template variable by name.
@@ -13,7 +14,8 @@ import { Combobox, ComboboxOption, Icon, Tooltip, useStyles2 } from '@grafana/ui
 //                          (use for optional slots; the step picker uses it).
 //   - `createCustomValue` — lets the user type a name not in the dropdown
 //                          (use for required slots where the variable may
-//                          not exist at config time — sliding from/to).
+//                          not exist at config time — windowed modes'
+//                          from/to).
 //   - `helperText` (+ `helperTextSeverity`) — contextual hint shown only
 //                          when no matching variables exist on the
 //                          dashboard. `warning` for required slots that
@@ -40,9 +42,9 @@ export interface VariablePickerSettings {
   // link that opens the dashboard's Variables settings.
   helperText?: string;
   // Visual treatment of the hint. `warning` (amber + exclamation-triangle)
-  // for required slots where missing variables block the panel (sliding
-  // from/to). `info` (blue + info-circle) for optional slots where a
-  // fallback exists (the step picker uses the built-in list when nothing
+  // for required slots where missing variables block the panel (windowed
+  // modes' from/to). `info` (blue + info-circle) for optional slots where
+  // a fallback exists (the step picker uses the built-in list when nothing
   // is bound). Defaults to `info` — the quieter choice; `warning` is opt-in.
   helperTextSeverity?: 'info' | 'warning';
   // Long-form explanation rendered behind an ⓘ icon next to the picker.
@@ -118,12 +120,12 @@ const getStyles = (theme: GrafanaTheme2) => ({
   `,
 });
 
-// Open the dashboard's Variables settings overlay. Documented Grafana deep
-// link: setting editview=variables on the dashboard URL surfaces the
-// variables tab without a full reload.
-const openDashboardVariables = (e: React.MouseEvent) => {
+// Anchor click handler: preventDefault stops the browser from following the
+// href, then we use Grafana's deep link to open the dashboard's Variables
+// settings overlay without a full reload.
+const handleHintClick = (e: React.MouseEvent) => {
   e.preventDefault();
-  locationService.partial({ editview: 'variables' }, false);
+  openDashboardVariables();
 };
 
 export const VariablePicker: React.FC<StandardEditorProps<string, VariablePickerSettings>> = ({
@@ -202,7 +204,7 @@ export const VariablePicker: React.FC<StandardEditorProps<string, VariablePicker
           href="?editview=variables"
           className={helperTextSeverity === 'warning' ? styles.warningLink : styles.infoLink}
           role="status"
-          onClick={openDashboardVariables}
+          onClick={handleHintClick}
         >
           <Icon
             name={helperTextSeverity === 'warning' ? 'exclamation-triangle' : 'info-circle'}

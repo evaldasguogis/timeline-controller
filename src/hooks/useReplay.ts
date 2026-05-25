@@ -12,8 +12,10 @@ export interface TickResult {
 export interface UseReplayOptions {
   tickIntervalMs: number;
   // Performs the mode-specific write for one step. Called once per timer tick
-  // during playback and once per user-driven Step. Should be wrapped in
-  // useCallback by the caller, otherwise the interval reschedules every render.
+  // during playback and once per user-driven Step. The interval reads it
+  // through a live ref, so callers don't need to memoize it — a fresh
+  // function each render is fine and updates take effect immediately
+  // without forcing a reschedule.
   onTick: (forward: boolean) => TickResult;
 }
 
@@ -25,9 +27,10 @@ export interface UseReplayResult {
 }
 
 // Owns the play/pause/step state machine and the timer that drives playback.
-// The actual "what changes on each tick" is delegated to onTick — modes plug
-// in their own writes (Basic shifts the global range; Sliding writes template
-// variables; etc.) without re-implementing the transport.
+// The actual "what changes on each tick" is delegated via onTick — its two
+// consumers are `useGlobalRangeReplay` (Basic mode, shifts the dashboard's
+// global range) and `useWindowedReplay` (Sliding + Event, write a pair of
+// template variables).
 export const useReplay = ({ tickIntervalMs, onTick }: UseReplayOptions): UseReplayResult => {
   const [state, setState] = useState<PlaybackState>('paused');
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);

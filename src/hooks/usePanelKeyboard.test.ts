@@ -1,7 +1,7 @@
 import { renderHook } from '@testing-library/react';
 import { KeyboardEvent, MouseEvent } from 'react';
 import { PlaybackState } from './useReplay';
-import { UsePanelKeyboardBindings, usePanelKeyboard } from './usePanelKeyboard';
+import { UsePanelKeyboardOptions, usePanelKeyboard } from './usePanelKeyboard';
 
 const makeEvent = (overrides: Partial<KeyboardEvent<HTMLElement>>): KeyboardEvent<HTMLElement> =>
   ({
@@ -20,12 +20,12 @@ const makeMouseEvent = (
   target: HTMLElement
 ): MouseEvent<HTMLDivElement> => ({ target } as unknown as MouseEvent<HTMLDivElement>);
 
-interface RenderOptions extends Partial<UsePanelKeyboardBindings> {
+interface RenderOptions extends Partial<UsePanelKeyboardOptions> {
   state?: PlaybackState;
 }
 
 const renderShortcuts = (overrides: RenderOptions = {}) => {
-  const bindings: UsePanelKeyboardBindings = {
+  const options: UsePanelKeyboardOptions = {
     state: 'paused',
     startPlayback: jest.fn(),
     pause: jest.fn(),
@@ -35,60 +35,60 @@ const renderShortcuts = (overrides: RenderOptions = {}) => {
     reset: jest.fn(),
     ...overrides,
   };
-  const { result } = renderHook(() => usePanelKeyboard(bindings));
-  return { panel: result.current, handler: result.current.onKeyDown, bindings };
+  const { result } = renderHook(() => usePanelKeyboard(options));
+  return { panel: result.current, handler: result.current.onKeyDown, options };
 };
 
 describe('usePanelKeyboard — shortcuts', () => {
   it.each([['k'], ['K']])('K toggles forward — starts when paused', (key) => {
-    const { handler, bindings } = renderShortcuts({ state: 'paused' });
+    const { handler, options } = renderShortcuts({ state: 'paused' });
     handler(makeEvent({ key }));
-    expect(bindings.startPlayback).toHaveBeenCalledWith(true);
-    expect(bindings.pause).not.toHaveBeenCalled();
+    expect(options.startPlayback).toHaveBeenCalledWith(true);
+    expect(options.pause).not.toHaveBeenCalled();
   });
 
   it('K toggles forward — pauses when already playing forward', () => {
-    const { handler, bindings } = renderShortcuts({ state: 'playing-forward' });
+    const { handler, options } = renderShortcuts({ state: 'playing-forward' });
     handler(makeEvent({ key: 'k' }));
-    expect(bindings.pause).toHaveBeenCalledTimes(1);
-    expect(bindings.startPlayback).not.toHaveBeenCalled();
+    expect(options.pause).toHaveBeenCalledTimes(1);
+    expect(options.startPlayback).not.toHaveBeenCalled();
   });
 
   it.each([['j'], ['J']])('J toggles backward — starts when paused', (key) => {
-    const { handler, bindings } = renderShortcuts({ state: 'paused' });
+    const { handler, options } = renderShortcuts({ state: 'paused' });
     handler(makeEvent({ key }));
-    expect(bindings.startPlayback).toHaveBeenCalledWith(false);
+    expect(options.startPlayback).toHaveBeenCalledWith(false);
   });
 
   it('J toggles backward — pauses when already playing (any direction)', () => {
-    const { handler, bindings } = renderShortcuts({ state: 'playing-back' });
+    const { handler, options } = renderShortcuts({ state: 'playing-back' });
     handler(makeEvent({ key: 'j' }));
-    expect(bindings.pause).toHaveBeenCalledTimes(1);
+    expect(options.pause).toHaveBeenCalledTimes(1);
   });
 
   it('steps back on comma, forward on period', () => {
-    const { handler, bindings } = renderShortcuts();
+    const { handler, options } = renderShortcuts();
     handler(makeEvent({ key: ',' }));
     handler(makeEvent({ key: '.' }));
-    expect(bindings.step).toHaveBeenNthCalledWith(1, false);
-    expect(bindings.step).toHaveBeenNthCalledWith(2, true);
+    expect(options.step).toHaveBeenNthCalledWith(1, false);
+    expect(options.step).toHaveBeenNthCalledWith(2, true);
   });
 
   it('pauses on Escape', () => {
-    const { handler, bindings } = renderShortcuts();
+    const { handler, options } = renderShortcuts();
     handler(makeEvent({ key: 'Escape' }));
-    expect(bindings.pause).toHaveBeenCalledTimes(1);
+    expect(options.pause).toHaveBeenCalledTimes(1);
   });
 
-  it('jumps to start/end on Home/End when bindings are provided', () => {
-    const { handler, bindings } = renderShortcuts();
+  it('jumps to start/end on Home/End when options are provided', () => {
+    const { handler, options } = renderShortcuts();
     handler(makeEvent({ key: 'Home' }));
     handler(makeEvent({ key: 'End' }));
-    expect(bindings.jumpToStart).toHaveBeenCalledTimes(1);
-    expect(bindings.jumpToEnd).toHaveBeenCalledTimes(1);
+    expect(options.jumpToStart).toHaveBeenCalledTimes(1);
+    expect(options.jumpToEnd).toHaveBeenCalledTimes(1);
   });
 
-  it('ignores Home/End when bindings are absent (basic mode)', () => {
+  it('ignores Home/End when options are absent (basic mode)', () => {
     const event = makeEvent({ key: 'Home' });
     const { handler } = renderShortcuts({
       jumpToStart: undefined,
@@ -99,28 +99,28 @@ describe('usePanelKeyboard — shortcuts', () => {
   });
 
   it.each([['r'], ['R']])('resets on %s when reset is provided', (key) => {
-    const { handler, bindings } = renderShortcuts();
+    const { handler, options } = renderShortcuts();
     handler(makeEvent({ key }));
-    expect(bindings.reset).toHaveBeenCalledTimes(1);
+    expect(options.reset).toHaveBeenCalledTimes(1);
   });
 
   it('does not intercept keys while typing in an input', () => {
     const input = document.createElement('input');
-    const { handler, bindings } = renderShortcuts();
+    const { handler, options } = renderShortcuts();
     handler(makeEvent({ key: 'k', target: input }));
     handler(makeEvent({ key: ',', target: input }));
     handler(makeEvent({ key: 'Escape', target: input }));
-    expect(bindings.startPlayback).not.toHaveBeenCalled();
-    expect(bindings.step).not.toHaveBeenCalled();
-    expect(bindings.pause).not.toHaveBeenCalled();
+    expect(options.startPlayback).not.toHaveBeenCalled();
+    expect(options.step).not.toHaveBeenCalled();
+    expect(options.pause).not.toHaveBeenCalled();
   });
 
   it('ignores keys held with Ctrl/Meta/Alt modifiers', () => {
-    const { handler, bindings } = renderShortcuts();
+    const { handler, options } = renderShortcuts();
     handler(makeEvent({ key: 'k', ctrlKey: true }));
     handler(makeEvent({ key: 'k', metaKey: true }));
     handler(makeEvent({ key: 'k', altKey: true }));
-    expect(bindings.startPlayback).not.toHaveBeenCalled();
+    expect(options.startPlayback).not.toHaveBeenCalled();
   });
 
   it('calls preventDefault when handling a key', () => {

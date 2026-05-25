@@ -15,10 +15,10 @@ interface Props {
   width?: number;
   // Optional upper bound on selectable step durations, in milliseconds.
   // Options whose duration exceeds this are filtered out of the dropdown.
-  // Used in sliding-window mode where a step bigger than the dashboard's
-  // global range can never slide and would just disable the controls.
-  // Combobox itself has no per-option disable — filtering is the cleanest
-  // way to keep nonsensical choices off the menu.
+  // Used by the windowed modes (Sliding + Event) where a step wider than
+  // the configured boundary can never slide and would just disable the
+  // controls. Combobox itself has no per-option disable — filtering is
+  // the cleanest way to keep nonsensical choices off the menu.
   maxMs?: number;
   // When provided, the dropdown's options and current value come from the
   // dashboard interval variable rather than the built-in list. The caller

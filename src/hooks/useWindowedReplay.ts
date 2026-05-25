@@ -8,14 +8,12 @@ import { PlaybackState, TickResult, useReplay } from './useReplay';
 import { PanelKeyboardProps, usePanelKeyboard } from './usePanelKeyboard';
 import { useLiveRef } from './useLiveRef';
 
-// Window-playback engine shared by SlidingWindowMode and EventReplayMode.
-// Both modes are mechanically identical — same tick math, same write
-// model — they only differ in where the boundary comes from (dashboard
-// global range vs. panel-saved bounds). This hook owns everything the
-// modes had in common: current-window state, playback transport, seed-
-// on-mount, step-resize, jump-to-start/end, keyboard shortcuts. The
-// modes are left with their unique pieces (validation, usage-marker
-// sync, the variable-picker / step-dropdown JSX shell).
+// Window-playback engine consumed by `WindowedMode` (the shared shell for
+// Sliding and Event modes). Owns the parts of playback that depend on the
+// boundary: current-window state, transport, seed-on-mount, step-resize,
+// jump-to-start/end, keyboard shortcuts. WindowedMode wraps this with the
+// presentation layer (validation, usage-marker sync, the variable-picker
+// / step-dropdown / progress-track JSX).
 
 export interface WindowMs {
   from: number;
@@ -37,8 +35,9 @@ export interface UseWindowedReplayOptions {
   tickIntervalMs: number;
   // Names of the dashboard variables to write window bounds into.
   variableSpec: { from: string; to: string };
-  // When true, writes are suppressed — modes' validation layer gates
-  // tick / step writes by setting this true.
+  // When true, writes are suppressed. WindowedMode flips this when its
+  // validation pass produces an error, so the panel never publishes
+  // half-broken variable values.
   hasErrors: boolean;
   // Optional dashboard-scoped event bus (from PanelProps). When provided,
   // we subscribe to TimeRangeUpdatedEvent and re-seed on fire — used by

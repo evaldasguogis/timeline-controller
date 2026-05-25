@@ -303,6 +303,73 @@ describe('BasicMode', () => {
     expect(partial).toHaveBeenCalledWith({ from: 'now-30m', to: 'now' });
   });
 
+  // After we Step, Grafana writes the new range to the URL and then echoes
+  // back a TimeRangeUpdatedEvent confirming it. The classifier must treat
+  // that echo as our own, not as an external pick — otherwise every Step
+  // would immediately flip hasStepped back to false and disable Reset.
+  it('Echo of our own Step write does not clear hasStepped', () => {
+    const { eventBus } = renderBasic();
+
+    act(() => {
+      screen.getByLabelText('Step back').click();
+    });
+    // Reset is enabled — confirms hasStepped flipped to true.
+    expect(screen.getByLabelText('Reset')).not.toHaveAttribute('aria-disabled', 'true');
+
+    // Grafana echoes the URL change we just made. Step back by 1m from
+    // [00:00, 01:00] lands on [23:59, 00:59] (previous day's 23:59).
+    const echo: TimeRange = {
+      from: dateTime('2026-05-15T23:59:00Z'),
+      to: dateTime('2026-05-16T00:59:00Z'),
+      raw: {
+        from: dateTime('2026-05-15T23:59:00Z'),
+        to: dateTime('2026-05-16T00:59:00Z'),
+      },
+    };
+    publishTimeRangeChange(eventBus, echo);
+
+    // hasStepped survives the echo — Reset still enabled.
+    expect(screen.getByLabelText('Reset')).not.toHaveAttribute('aria-disabled', 'true');
+  });
+
+  // On dashboard load Grafana sometimes publishes a TimeRangeUpdatedEvent
+  // matching the current picker range — before our panel has written
+  // anything, so the own-write classifier can't catch it. The baseline-
+  // echo branch must catch it; otherwise the baseline would flip from the
+  // user's relative form ('now-1h') to the absolute values carried in the
+  // event payload, and Reset would lose the "follow the clock" semantics
+  // the relative form gives.
+  it('Mount-time echo matching the baseline does not flip the baseline to absolute', () => {
+    // Set the wall clock so 'now-1h' resolves to 00:00:00 — otherwise the
+    // classifier would see a value mismatch and trivially fall through.
+    jest.setSystemTime(new Date('2026-05-16T01:00:00Z'));
+
+    const { eventBus } = renderBasic();
+
+    const echo: TimeRange = {
+      from: dateTime('2026-05-16T00:00:00Z'),
+      to: dateTime('2026-05-16T01:00:00Z'),
+      raw: {
+        from: dateTime('2026-05-16T00:00:00Z'),
+        to: dateTime('2026-05-16T01:00:00Z'),
+      },
+    };
+    publishTimeRangeChange(eventBus, echo);
+
+    // Step, then Reset — Reset writes whatever the *current* baseline is.
+    // Original baseline raw is the relative form; if the echo got adopted,
+    // we'd see absolute values here instead.
+    act(() => {
+      screen.getByLabelText('Step back').click();
+    });
+    partial.mockClear();
+    act(() => {
+      screen.getByLabelText('Reset').click();
+    });
+
+    expect(partial).toHaveBeenCalledWith({ from: 'now-1h', to: 'now' });
+  });
+
   it('Three external picks in a row leave the baseline on the most recent', () => {
     const { eventBus } = renderBasic();
 

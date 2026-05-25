@@ -12,6 +12,7 @@ import {
 import { setVariables } from '../utils/variables';
 import { validateVariableConfig } from '../utils/variableValidation';
 import { readIntervalVariable } from '../utils/intervalVariable';
+import { openDashboardVariables } from '../utils/navigation';
 import { TimeStepDropdown } from '../components/TimeStepDropdown';
 import { PlaybackControls } from '../components/PlaybackControls';
 import { WindowProgressTrack } from '../components/WindowProgressTrack';
@@ -47,8 +48,8 @@ interface WindowedModeProps<T extends WindowedModeOptions> {
 
 // One title for the error/warning Alert across both modes. The individual
 // error messages are descriptive on their own ("Event boundary is not
-// set...", "variableFrom and variableTo must differ"), so the title only
-// needs to flag *that* this is a configuration problem.
+// set...", `Variable name "from" is required.`), so the title only needs
+// to flag *that* this is a configuration problem.
 const ALERT_TITLE = 'Panel configuration';
 
 const horizontalToJustify: Record<HorizontalAlignment, string> = {
@@ -127,18 +128,11 @@ const getStyles = (theme: GrafanaTheme2, justifyContent: string, alignItems: str
 // marker) so Grafana's "missing variable" hint points at the specific
 // binding — `_variableFrom`, `_variableTo`, or `_variableStep` — which
 // tells the user immediately which one is broken.
-const buildUsageMarkers = (m: WindowedModeOptions) => ({
-  _variableFrom: m.variableFrom.trim() ? `\${${m.variableFrom}}` : '',
-  _variableTo: m.variableTo.trim() ? `\${${m.variableTo}}` : '',
-  _variableStep: m.variableStep.trim() ? `\${${m.variableStep}}` : '',
+const buildUsageMarkers = (modeOptions: WindowedModeOptions) => ({
+  _variableFrom: modeOptions.variableFrom.trim() ? `\${${modeOptions.variableFrom}}` : '',
+  _variableTo: modeOptions.variableTo.trim() ? `\${${modeOptions.variableTo}}` : '',
+  _variableStep: modeOptions.variableStep.trim() ? `\${${modeOptions.variableStep}}` : '',
 });
-
-// `editview=variables` opens the dashboard settings overlay on the
-// variables tab. Same deep link the VariablePicker's warning hint uses
-// — keep them in lockstep so behavior is consistent across the panel.
-const openDashboardVariables = () => {
-  locationService.partial({ editview: 'variables' }, false);
-};
 
 export const WindowedMode = <T extends WindowedModeOptions>({
   modeOptions,

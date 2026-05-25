@@ -15,7 +15,7 @@ import { PlaybackState } from './useReplay';
 // step, Home / End jump (when bound), Esc pauses, R resets (when bound).
 // Skipped while focus is in a text input or when Ctrl/Meta/Alt is held.
 
-export interface UsePanelKeyboardBindings {
+export interface UsePanelKeyboardOptions {
   // Current playback state. Drives togglers' branch (paused → start, else
   // → pause).
   state: PlaybackState;
@@ -69,7 +69,7 @@ export const usePanelKeyboard = ({
   jumpToStart,
   jumpToEnd,
   reset,
-}: UsePanelKeyboardBindings): PanelKeyboardProps => {
+}: UsePanelKeyboardOptions): PanelKeyboardProps => {
   const ref = useRef<HTMLDivElement>(null);
 
   const onKeyDown = useCallback(

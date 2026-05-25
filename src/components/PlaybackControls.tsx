@@ -10,7 +10,7 @@ import { PlaybackState } from '../hooks/useReplay';
 // native stepper makes the control feel built-in.
 //
 // Jump-to-start / Jump-to-end are optional: pass `onJumpToStart` and
-// `onJumpToEnd` to opt in (sliding-window mode does, basic mode doesn't
+// `onJumpToEnd` to opt in (the windowed modes do, basic mode doesn't
 // since its "timeline" is wall-clock and jumping to either endpoint is
 // either meaningless or destructive).
 

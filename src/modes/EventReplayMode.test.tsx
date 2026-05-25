@@ -209,6 +209,20 @@ describe('EventReplayMode', () => {
       });
       expect(lastVarsCall()).toBeUndefined();
     });
+
+    // Pure boundary errors (variable names still valid) shouldn't surface the
+    // "Open dashboard variables" link — there's nothing on the variables tab
+    // for the user to fix. The link only makes sense when at least one error
+    // came from validateVariableConfig.
+    it('hides the "Open dashboard variables" button when only the boundary is invalid', () => {
+      dashboardVariables = [
+        { name: 'timeFrom', type: 'textbox' },
+        { name: 'timeTo', type: 'textbox' },
+      ];
+      renderEvent({ boundaryFrom: 0, boundaryTo: 0 });
+      expect(screen.getByText(/Event boundary is not set/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Open dashboard variables/ })).not.toBeInTheDocument();
+    });
   });
 
   describe('variable validation', () => {
@@ -216,6 +230,13 @@ describe('EventReplayMode', () => {
       renderEvent({ variableFrom: '' });
       expect(screen.getByText(/Variable name "from" is required/)).toBeInTheDocument();
       expect(screen.queryByLabelText('Play forward')).not.toBeInTheDocument();
+    });
+
+    // Counterpart to the boundary-only test above: when the errors *do*
+    // include a variable error, the "Open dashboard variables" link shows.
+    it('shows the "Open dashboard variables" button when a variable error is present', () => {
+      renderEvent({ variableFrom: '' });
+      expect(screen.getByRole('button', { name: /Open dashboard variables/ })).toBeInTheDocument();
     });
   });
 });

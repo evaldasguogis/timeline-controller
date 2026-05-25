@@ -16,8 +16,8 @@ export type VerticalAlignment = 'top' | 'middle' | 'bottom';
 
 // Modes are fundamentally different things, so they're a discriminator on the
 // top-level options rather than a boolean flag. Each mode has its own option
-// sub-object — they don't share defaults, and most options aren't meaningful
-// outside their own mode.
+// sub-object so most fields don't have to be meaningful in the others; Sliding
+// and Event share most of their fields via `WindowedModeOptions` below.
 export type Mode = 'basic' | 'sliding' | 'event';
 
 // Where the window is anchored when sliding/event mode first seeds or

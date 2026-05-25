@@ -30,16 +30,17 @@ const VERTICAL_ALIGNMENT_OPTIONS: Array<SelectableValue<VerticalAlignment>> = [
 // registration shell — the same split the official Grafana clock-panel uses.
 //
 // Editor option visibility is gated on the selected mode via `showIf`: only
-// the relevant mode's options appear. Keeping Basic and Sliding settings in
-// separate sub-objects (rather than sharing fields) makes this trivial — each
-// field's path makes its mode unambiguous.
+// the relevant mode's options appear. Each mode's settings live in their own
+// sub-object so a field's path (e.g. `sliding.variableFrom`) makes its mode
+// unambiguous.
 //
 // Category order matters: Grafana renders categories in the order their first
-// option is registered. For sliding mode the editor reads top-to-bottom as:
-//   Mode → Window variables → Step variable → Playback → Layout
-// For event mode "Event boundary" sits between Mode and Window variables
-// because the configured range is the option that distinguishes Event Replay
-// from Sliding Window — see it first when configuring the mode.
+// option is registered. The canonical order is:
+//   Mode → [Event boundary] → [Window variables] → Step variable → Playback → Layout
+// "Event boundary" appears only in Event mode and sits between Mode and
+// Window variables — that saved range is what distinguishes Event Replay
+// from Sliding Window, so the user sees it first when configuring the mode.
+// "Window variables" doesn't apply to Basic (which has no variable bounds).
 
 // Description = the single-sentence "what does this do" line that shows
 // under the option name (Grafana renders it as inline plain text — no line
